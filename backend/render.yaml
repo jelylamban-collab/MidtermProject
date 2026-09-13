@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: ticketrush-api
+    env: python
+    buildCommand: pip install -r requirements.txt && alembic upgrade head && python scripts/seed.py
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_MINUTES
+        value: 120
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SEED_SAMPLE_DATA
+        value: true
