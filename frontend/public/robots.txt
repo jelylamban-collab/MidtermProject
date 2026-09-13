@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://frontend-two-ashy-46.vercel.app/sitemap.xml
