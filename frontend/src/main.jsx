@@ -584,8 +584,8 @@ function Landing() {
       </section>
       <section className="section">
         <SectionTitle kicker="Featured" title="Upcoming Events" />
-        <div className="concert-grid">
-          {concerts.slice(0, 3).map((concert) => <ConcertCard concert={concert} key={concert.schedule_id} />)}
+        <div className="featured-concert-scroll" aria-label="Featured upcoming concerts">
+          {concerts.map((concert) => <ConcertCard concert={concert} key={concert.schedule_id} />)}
         </div>
       </section>
       <section className="section two-column">

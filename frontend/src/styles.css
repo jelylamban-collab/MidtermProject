@@ -361,6 +361,22 @@ input[type="checkbox"], input[type="radio"] { flex-shrink: 0; }
 .page-actions { flex-wrap: wrap; gap: 10px; }
 
 .concert-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.featured-concert-scroll {
+  display: grid;
+  gap: 20px;
+  grid-auto-columns: minmax(300px, 31vw);
+  grid-auto-flow: column;
+  margin-inline: calc(var(--page-gutter) * -1);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 0 var(--page-gutter) 18px;
+  scroll-padding-inline: var(--page-gutter);
+  scroll-snap-type: x proximity;
+}
+.featured-concert-scroll .concert-card {
+  min-width: 0;
+  scroll-snap-align: start;
+}
 .concert-card { display: block; overflow: hidden; transition: .2s ease; }
 .concert-card:hover { border-color: rgb(255 138 42 / .48); transform: translateY(-4px); }
 .poster-wrap { aspect-ratio: 4 / 5; position: relative; }
