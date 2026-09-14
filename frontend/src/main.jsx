@@ -41,7 +41,7 @@ import logoWordmark from "../images/ChatGPT Image Sep 11, 2026, 11_06_56 AM - Co
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-const peso = (value) => `PHP ${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+const peso = (value) => `₱${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
 const prettyDate = (value) => (value ? new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "");
 const maxTicketsPerTier = 4;
 
@@ -414,7 +414,7 @@ function Shell({ auth, logout }) {
         <Route path="/help" element={<Info title="Help and FAQ" />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <SiteFooter />
+      <SiteFooter role={role} auth={auth} />
     </div>
   );
 }
@@ -809,7 +809,7 @@ function SeatSelection({ auth }) {
             {tiers.map((tier) => (
               <button className={`tier-choice ${selectedTier === tier.name ? "active" : ""}`} onClick={() => { setSelectedTier(tier.name); setSelected([]); }} key={tier.name}>
                 <strong>{tier.name}</strong>
-                <span>{tier.available}/{tier.total} available · {peso(tier.price)}</span>
+                <span>{tier.available}/{tier.total} available - {peso(tier.price)}</span>
               </button>
             ))}
           </div>
@@ -917,7 +917,7 @@ function Tickets({ auth }) {
             <div>
               <span className="status-pill">Digital Ticket</span>
               <h3>{ticket.concert}</h3>
-              <p>{ticket.artist} · Seat {ticket.seat}</p>
+              <p>{ticket.artist} - Seat {ticket.seat}</p>
               <p className="muted">{ticket.ticket_number}</p>
             </div>
             <div className="qr-box"><QRCodeCanvas value={ticket.qr_payload} size={156} /></div>
@@ -939,7 +939,7 @@ function TicketDetails({ auth }) {
   useEffect(() => { api("/tickets", {}, auth).then((items) => setTicket(items.find((item) => String(item.id) === String(ticketId)))); }, [auth, ticketId]);
   if (!ticket) return <Loading />;
   return (
-    <Page title="Ticket Details" icon={<Ticket />}>
+    <Page title="Ticket Details" icon={<Ticket />} action={<Link className="btn-small" to="/tickets"><ArrowLeft size={16} /> Back to Tickets</Link>}>
       <div className="ticket-detail">
         <div className="ticket-card large">
           <div>
@@ -982,16 +982,28 @@ function Cart() {
   );
 }
 
-function SiteFooter() {
+function SiteFooter({ role = "guest", auth }) {
+  const guestLinks = [
+    ["Browse Concerts", "/concerts"],
+    ["About", "/about"],
+    ["Help and FAQs", "/help"],
+    ["Log In", "/login"],
+    ["Create Account", "/register"],
+  ];
+  const customerLinks = [
+    ["Browse Concerts", "/concerts"],
+    ["My Cart", "/cart"],
+    ["My Tickets", "/tickets"],
+    ["Purchase History", "/history"],
+    ["Notifications", "/notifications"],
+    ["Profile", "/profile"],
+  ];
+  const links = role === "customer" && auth ? customerLinks : guestLinks;
   return (
     <footer className="footer site-footer">
       <div className="footer-brand"><BrandLogo /><p>Online concert ticketing for discovering events, reserving seats, and managing digital tickets in one place.</p></div>
       <div className="footer-links">
-        <Link to="/concerts">Browse Concerts</Link>
-        <Link to="/about">About</Link>
-        <Link to="/help">Help and FAQs</Link>
-        <Link to="/help">Terms and Conditions</Link>
-        <Link to="/help">Privacy Policy</Link>
+        {links.map(([label, path]) => <NavLink to={path} key={`${label}-${path}`}>{label}</NavLink>)}
       </div>
       <div className="footer-contact"><strong>Contact</strong><span>support@ticketrush.example.com</span></div>
       <div className="footer-bottom">© 2026 TicketRush. All rights reserved.</div>
@@ -1019,7 +1031,7 @@ function Notifications({ role }) {
 function HistoryPage({ auth }) {
   const [rows, setRows] = useState([]);
   useEffect(() => { api("/reservations", {}, auth).then(setRows); }, []);
-  return <Page title="Purchase History" icon={<History />}><Table rows={rows} columns={["booking_reference", "status", "total_amount", "created_at"]} /></Page>;
+  return <Page title="Purchase History" icon={<History />}><Table rows={rows.map((row) => ({ ...row, total_amount: peso(row.total_amount), created_at: prettyDate(row.created_at) }))} columns={["booking_reference", "status", "total_amount", "created_at"]} /></Page>;
 }
 
 function Profile({ auth }) {
@@ -1071,9 +1083,9 @@ function Profile({ auth }) {
         {["overview", "personal", "tickets", "history", "security"].map((item) => <button className={tab === item ? "active" : ""} onClick={() => setTab(item)} key={item}>{item.replace(/^\w/, (c) => c.toUpperCase())}</button>)}
       </div>
       <Feedback message={message} />
-      {tab === "overview" && <><div className="business-metrics secondary"><Stat label="Upcoming Concerts" value={tickets.filter((ticket) => new Date(ticket.starts_at) >= new Date()).length} /><Stat label="Active Reservations" value={history.filter((row) => ["held", "pending"].includes(row.status)).length} /><Stat label="Total Tickets Purchased" value={tickets.length} /><Stat label="Completed Purchases" value={history.filter((row) => ["confirmed", "completed"].includes(row.status)).length} /></div>{nextTicket ? <div className="upcoming-card profile-next"><SafeImage src={nextTicket.poster_url} /><div><h4>{nextTicket.concert}</h4><p>{prettyDate(nextTicket.starts_at)} · {nextTicket.venue}</p><span>{nextTicket.category} · Seat {nextTicket.seat}</span><Link className="btn-small" to={`/tickets/${nextTicket.id}`}>View Ticket</Link></div></div> : <EmptyState title="No upcoming event yet" text="Your next confirmed ticket will appear here." />}</>}
+      {tab === "overview" && <><div className="business-metrics secondary"><Stat label="Upcoming Concerts" value={tickets.filter((ticket) => new Date(ticket.starts_at) >= new Date()).length} /><Stat label="Active Reservations" value={history.filter((row) => ["held", "pending"].includes(row.status)).length} /><Stat label="Total Tickets Purchased" value={tickets.length} /><Stat label="Completed Purchases" value={history.filter((row) => ["confirmed", "completed"].includes(row.status)).length} /></div>{nextTicket ? <div className="upcoming-card profile-next"><SafeImage src={nextTicket.poster_url} /><div><h4>{nextTicket.concert}</h4><p>{prettyDate(nextTicket.starts_at)} - {nextTicket.venue}</p><span>{nextTicket.category} - Seat {nextTicket.seat}</span><Link className="btn-small" to={`/tickets/${nextTicket.id}`}>View Ticket</Link></div></div> : <EmptyState title="No upcoming event yet" text="Your next confirmed ticket will appear here." />}</>}
       {tab === "personal" && <form className="auth-card" onSubmit={saveProfile}><input className="field" value={profile.first_name} onChange={(e) => setProfile({ ...profile, first_name: e.target.value })} placeholder="First name" /><input className="field" value={profile.last_name} onChange={(e) => setProfile({ ...profile, last_name: e.target.value })} placeholder="Last name" /><input className="field" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} placeholder="Email" /><input className="field" value={profile.contact_number} onChange={(e) => setProfile({ ...profile, contact_number: e.target.value })} placeholder="Contact number" /><button className="btn">Save Profile</button></form>}
-      {tab === "tickets" && <div className="ticket-grid">{tickets.map((ticket) => <div className="ticket-card" key={ticket.id}><div><span className="status-pill">Valid</span><h3>{ticket.concert}</h3><p>{prettyDate(ticket.starts_at)} · {ticket.venue}</p><p>{ticket.category} · Seat {ticket.seat}</p></div><div className="ticket-actions"><Link className="btn-small" to={`/tickets/${ticket.id}`}>View Ticket</Link><button className="btn-small" onClick={() => downloadTicketPdf(ticket.id, auth)}>Download</button></div></div>)}</div>}
+      {tab === "tickets" && <div className="ticket-grid">{tickets.map((ticket) => <div className="ticket-card" key={ticket.id}><div><span className="status-pill">Valid</span><h3>{ticket.concert}</h3><p>{prettyDate(ticket.starts_at)} - {ticket.venue}</p><p>{ticket.category} - Seat {ticket.seat}</p></div><div className="ticket-actions"><Link className="btn-small" to={`/tickets/${ticket.id}`}>View Ticket</Link><button className="btn-small" onClick={() => downloadTicketPdf(ticket.id, auth)}>Download</button></div></div>)}</div>}
       {tab === "history" && <Table rows={history.map((row) => ({ ...row, total_amount: peso(row.total_amount), created_at: prettyDate(row.created_at) }))} columns={["booking_reference", "status", "total_amount", "created_at"]} searchable />}
       {tab === "security" && <form className="auth-card" onSubmit={savePassword}><input className="field" type="password" value={password.current_password} onChange={(e) => setPassword({ ...password, current_password: e.target.value })} placeholder="Current password" /><input className="field" type="password" value={password.new_password} onChange={(e) => setPassword({ ...password, new_password: e.target.value })} placeholder="New password" /><input className="field" type="password" value={password.confirm} onChange={(e) => setPassword({ ...password, confirm: e.target.value })} placeholder="Confirm new password" /><button className="btn">Change Password</button></form>}
     </Page>
@@ -1084,9 +1096,20 @@ function AuthPage({ register = false }) {
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "", full_name: "" });
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   async function submit(event) {
     event.preventDefault();
+    if (busy) return;
     setError("");
+    if (register && form.full_name.trim().length < 2) {
+      setError("Please enter your full name.");
+      return;
+    }
+    if (!form.email.includes("@") || form.password.length < 8) {
+      setError("Please enter a valid email and a password with at least 8 characters.");
+      return;
+    }
+    setBusy(true);
     try {
       if (register) await api("/auth/register", { method: "POST", body: JSON.stringify(form) });
       const result = await api("/auth/login", { method: "POST", body: JSON.stringify(form) });
@@ -1094,8 +1117,12 @@ function AuthPage({ register = false }) {
       const returnTo = sessionStorage.getItem("ticketrush_return_to");
       sessionStorage.removeItem("ticketrush_return_to");
       navigate(result.user.role === "admin" ? "/admin" : returnTo || "/concerts");
-    } catch {
-      setError(register ? "Could not create this account." : "Invalid email or password.");
+    } catch (error) {
+      const message = error.message || "";
+      if (register && /registered|409/i.test(message)) setError("This email already has a TicketRush account. Please log in instead.");
+      else setError(register ? "Could not create this account. Please check your details and try again." : "Invalid email or password.");
+    } finally {
+      setBusy(false);
     }
   }
   return (
@@ -1103,10 +1130,10 @@ function AuthPage({ register = false }) {
       <form onSubmit={submit} className="auth-card">
         <div><h2>{register ? "Create your account" : "Welcome back"}</h2><p>Use the demo credentials or create a customer account.</p></div>
         {error && <div className="error-banner">{error}</div>}
-        {register && <input className="field" placeholder="Full name" onChange={(e) => setForm({ ...form, full_name: e.target.value })} />}
-        <input className="field" placeholder="Email" onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <input className="field" type="password" placeholder="Password" onChange={(e) => setForm({ ...form, password: e.target.value })} />
-        <button className="btn wide">{register ? "Create Account" : "Login"}</button>
+        {register && <input className="field" placeholder="Full name" value={form.full_name} disabled={busy} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />}
+        <input className="field" placeholder="Email" value={form.email} disabled={busy} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        <input className="field" type="password" placeholder="Password" value={form.password} disabled={busy} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        <button className="btn wide" disabled={busy}>{busy ? (register ? "Creating..." : "Logging in...") : (register ? "Create Account" : "Login")}</button>
         <Link className="muted center" to={register ? "/login" : "/register"}>{register ? "Already have an account?" : "Need an account?"}</Link>
       </form>
     </Page>
@@ -1166,7 +1193,7 @@ function AdminDashboard({ auth }) {
           <SeatOccupancyCard occupancy={view.seat_occupancy} tiers={view.tiers} />
         </DataPanel>
         <DataPanel title="Ticket Sales by Concert">
-          {view.concerts.length === 1 ? <ConcertPerformanceCard concert={view.concerts[0]} /> : <HorizontalBars rows={view.concerts.slice(0, 6).map((row) => ({ label: row.title, value: row.sold, detail: `${peso(row.revenue)} · ${row.occupancy}%`, to: `/admin/concerts/view/${row.schedule_id}` }))} empty="No concerts match the selected filters." />}
+          {view.concerts.length === 1 ? <ConcertPerformanceCard concert={view.concerts[0]} /> : <HorizontalBars rows={view.concerts.slice(0, 6).map((row) => ({ label: row.title, value: row.sold, detail: `${peso(row.revenue)} - ${row.occupancy}%`, to: `/admin/concerts/view/${row.schedule_id}` }))} empty="No concerts match the selected filters." />}
         </DataPanel>
         <DataPanel title="Upcoming Concert">
           {upcoming ? <UpcomingConcertCard concert={upcoming} /> : <EmptyState title="No upcoming published concert" text="Draft, archived, cancelled, and completed concerts are excluded." />}
@@ -1344,7 +1371,7 @@ function TrendChart({ rows }) {
     <div className="trend-chart">
       <div className="chart-legend"><span><i className="revenue-key" /> Revenue</span><span><i className="ticket-key" /> Tickets</span></div>
       {rows.map((row) => (
-        <div className="trend-row" key={row.date} title={`${row.date}: ${peso(row.revenue)} · ${row.tickets} tickets`}>
+        <div className="trend-row" key={row.date} title={`${row.date}: ${peso(row.revenue)} - ${row.tickets} tickets`}>
           <span>{row.date}</span>
           <div><i className="revenue-bar" style={{ width: `${Math.max((Number(row.revenue || 0) / maxRevenue) * 100, 3)}%` }} /><i className="ticket-bar" style={{ width: `${Math.max((Number(row.tickets || 0) / maxTickets) * 100, 3)}%` }} /></div>
           <strong>{peso(row.revenue)}</strong>
@@ -1387,7 +1414,7 @@ function ConcertPerformanceCard({ concert }) {
 }
 
 function UpcomingConcertCard({ concert }) {
-  return <div className="upcoming-card"><SafeImage src={concert.poster_url} /><div><StatusBadge status={concert.status} /><h4>{concert.title}</h4><p>{concert.artist}</p><span><MapPin size={14} /> {concert.venue}</span><span><Calendar size={14} /> {prettyDate(concert.starts_at)}</span><div className="meta-line"><span>{concert.days_remaining ?? 0} days left</span><span>{concert.sold} sold · {concert.available_seats} left</span></div><Link className="btn-small" to={`/admin/concerts/view/${concert.schedule_id}`}><Eye size={14} /> View Concert</Link></div></div>;
+  return <div className="upcoming-card"><SafeImage src={concert.poster_url} /><div><StatusBadge status={concert.status} /><h4>{concert.title}</h4><p>{concert.artist}</p><span><MapPin size={14} /> {concert.venue}</span><span><Calendar size={14} /> {prettyDate(concert.starts_at)}</span><div className="meta-line"><span>{concert.days_remaining ?? 0} days left</span><span>{concert.sold} sold - {concert.available_seats} left</span></div><Link className="btn-small" to={`/admin/concerts/view/${concert.schedule_id}`}><Eye size={14} /> View Concert</Link></div></div>;
 }
 
 function StatusBadge({ status }) {
@@ -2142,7 +2169,7 @@ function AdminReports({ auth }) {
         </>
       )}
       {tab === "concerts" && <Table rows={view.concerts.map((row) => ({ ...row, poster: <SafeImage className="table-poster" src={row.poster_url} />, revenue: peso(row.revenue), occupancy: `${row.occupancy}%`, performance_status: <StatusBadge status={row.performance_status} /> }))} columns={["poster", "title", "artist", "venue", "starts_at", "total_seats", "sold", "available_seats", "occupancy", "revenue", "performance_status"]} actions={(row) => <Link className="btn-small" to={`/admin/concerts/view/${row.schedule_id}`}><Eye size={14} /> View</Link>} />}
-      {tab === "tiers" && <><DataPanel title="Ticket Sales by Tier"><HorizontalBars rows={view.tiers.map((row) => ({ label: `${row.tier} · ${row.concert}`, value: row.tickets_sold, detail: peso(row.revenue) }))} empty="No tier sales match the selected filters." /></DataPanel><Table rows={view.tiers.map((row) => ({ ...row, price: peso(row.price), revenue: peso(row.revenue), occupancy: `${row.occupancy}%` }))} columns={["tier", "concert", "venue_section", "price", "allocated_seats", "tickets_sold", "available_seats", "occupancy", "revenue"]} /></>}
+      {tab === "tiers" && <><DataPanel title="Ticket Sales by Tier"><HorizontalBars rows={view.tiers.map((row) => ({ label: `${row.tier} - ${row.concert}`, value: row.tickets_sold, detail: peso(row.revenue) }))} empty="No tier sales match the selected filters." /></DataPanel><Table rows={view.tiers.map((row) => ({ ...row, price: peso(row.price), revenue: peso(row.revenue), occupancy: `${row.occupancy}%` }))} columns={["tier", "concert", "venue_section", "price", "allocated_seats", "tickets_sold", "available_seats", "occupancy", "revenue"]} /></>}
       {tab === "reservations" && <><div className="business-metrics secondary"><Stat label="Active Reservations" value={view.reservations.filter((row) => row.status === "active" || row.status === "held").length} /><Stat label="Confirmed Reservations" value={view.reservations.filter((row) => row.status === "confirmed").length} /><Stat label="Expired Holds" value={view.reservations.filter((row) => row.status === "expired").length} /><Stat label="Cancelled Reservations" value={view.reservations.filter((row) => row.status === "cancelled").length} /></div><Table rows={view.reservations.map((row) => ({ ...row, total_amount: peso(row.total_amount), hold_expiration: prettyDate(row.hold_expiration), created_at: prettyDate(row.created_at) }))} columns={["booking_reference", "customer", "concert", "reserved_seats", "quantity", "total_amount", "status", "hold_expiration", "created_at"]} /></>}
       {tab === "customers" && <><div className="business-metrics secondary"><Stat label="Total Customers" value={view.customers.length} /><Stat label="New Customers" value={view.customers.filter((row) => row.total_bookings <= 1).length} /><Stat label="Returning Customers" value={view.customers.filter((row) => row.total_bookings > 1).length} /><Stat label="Completed Purchasers" value={view.customers.filter((row) => row.tickets_purchased > 0).length} /></div><Table rows={view.customers.map((row) => ({ ...row, total_spent: peso(row.total_spent), last_purchase: prettyDate(row.last_purchase) }))} columns={["customer", "email", "total_bookings", "tickets_purchased", "total_spent", "last_purchase", "account_status"]} /></>}
     </Page>
