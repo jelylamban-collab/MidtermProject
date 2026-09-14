@@ -443,6 +443,7 @@ def hold_seats(db: Session, user: User, schedule_id: int, seat_ids: list[int]) -
     now = utcnow()
     expires = now + timedelta(minutes=5)
     sorted_ids = sorted(set(seat_ids))
+    selected_expirations = []
     try:
         cleanup_expired_holds(db)
         with db.begin_nested():
@@ -469,15 +470,36 @@ def hold_seats(db: Session, user: User, schedule_id: int, seat_ids: list[int]) -
                 if hold and hold.user_id != user.id:
                     raise HTTPException(status.HTTP_409_CONFLICT, "Seat already reserved")
                 if hold and hold.user_id == user.id:
-                    hold.expires_at = expires
+                    selected_expirations.append(hold.expires_at)
                 else:
                     db.add(SeatHold(schedule_id=schedule_id, seat_id=seat_id, user_id=user.id, expires_at=expires))
+                    selected_expirations.append(expires)
         db.commit()
     except OperationalError as exc:
         db.rollback()
         log_event(db, "hold_seats", "timeout", details=str(exc))
         raise HTTPException(status.HTTP_409_CONFLICT, "Seat lock timed out")
-    return {"held_until": expires, "seat_ids": sorted_ids}
+    return {"held_until": min(selected_expirations) if selected_expirations else expires, "seat_ids": sorted_ids}
+
+
+def release_holds(db: Session, user: User, schedule_id: int, seat_ids: list[int]) -> dict:
+    now = utcnow()
+    sorted_ids = sorted(set(seat_ids))
+    if not sorted_ids:
+        raise HTTPException(400, "Select at least one seat")
+    released = (
+        db.query(SeatHold)
+        .filter(
+            SeatHold.schedule_id == schedule_id,
+            SeatHold.seat_id.in_(sorted_ids),
+            SeatHold.user_id == user.id,
+            SeatHold.released_at.is_(None),
+            SeatHold.expires_at > now,
+        )
+        .update({"released_at": now}, synchronize_session=False)
+    )
+    db.commit()
+    return {"released": released, "seat_ids": sorted_ids}
 
 
 def checkout(db: Session, user: User, schedule_id: int, seat_ids: list[int], idempotency_key: str, method: str) -> Reservation:

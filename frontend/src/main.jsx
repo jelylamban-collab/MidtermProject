@@ -49,6 +49,8 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const peso = (value) => `₱${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
 const prettyDate = (value) => (value ? new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "");
 const maxTicketsPerTier = 4;
+const holdSecondsLeft = (heldUntil) => Math.max(Math.ceil((new Date(heldUntil || 0).getTime() - Date.now()) / 1000), 0);
+const formatHoldTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
 function dateInputValue(daysFromNow, hour = 19, minute = 0) {
   const date = new Date();
@@ -447,7 +449,7 @@ function Shell({ auth, logout }) {
         <Route path="/seat-selection/:scheduleId" element={<SeatSelection auth={auth} />} />
         <Route path="/checkout/:scheduleId" element={<CustomerOnly auth={auth}><Checkout auth={auth} /></CustomerOnly>} />
         <Route path="/confirmation/:ref" element={<Confirmation />} />
-        <Route path="/cart" element={<CustomerOnly auth={auth}><Cart /></CustomerOnly>} />
+        <Route path="/cart" element={<CustomerOnly auth={auth}><Cart auth={auth} /></CustomerOnly>} />
         <Route path="/tickets" element={<CustomerOnly auth={auth}><Tickets auth={auth} /></CustomerOnly>} />
         <Route path="/tickets/:ticketId" element={<CustomerOnly auth={auth}><TicketDetails auth={auth} /></CustomerOnly>} />
         <Route path="/history" element={<CustomerOnly auth={auth}><HistoryPage auth={auth} /></CustomerOnly>} />
@@ -822,8 +824,8 @@ function SeatSelection({ auth }) {
     if (!auth) return navigate("/login");
     setError("");
     try {
-      await api("/holds", { method: "POST", body: JSON.stringify({ schedule_id: Number(scheduleId), seat_ids: selected }) }, auth);
-      sessionStorage.setItem("ticketrush_selection", JSON.stringify({ scheduleId, selected, heldAt: Date.now(), seats: selectedSeats }));
+      const holdResult = await api("/holds", { method: "POST", body: JSON.stringify({ schedule_id: Number(scheduleId), seat_ids: selected }) }, auth);
+      sessionStorage.setItem("ticketrush_selection", JSON.stringify({ scheduleId, selected, heldUntil: holdResult.held_until, seats: selectedSeats }));
       navigate(`/checkout/${scheduleId}`);
     } catch (error) {
       const selectedLabels = selectedSeats.map((seat) => seat.label).join(", ");
@@ -903,12 +905,30 @@ function Checkout({ auth }) {
   const { scheduleId } = useParams();
   const navigate = useNavigate();
   const selection = JSON.parse(sessionStorage.getItem("ticketrush_selection") || "{}");
-  const [seconds, setSeconds] = useState(300);
+  const [seconds, setSeconds] = useState(() => holdSecondsLeft(selection.heldUntil));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const seats = selection.seats || [];
   const subtotal = seats.reduce((sum, seat) => sum + Number(seat.price), 0);
-  useEffect(() => { const id = setInterval(() => setSeconds((s) => Math.max(s - 1, 0)), 1000); return () => clearInterval(id); }, []);
+  useEffect(() => {
+    const tick = () => {
+      const left = holdSecondsLeft(selection.heldUntil);
+      setSeconds(left);
+      if (!left && selection.selected?.length) sessionStorage.removeItem("ticketrush_selection");
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [selection.heldUntil]);
+  async function cancelHold() {
+    if (!selection.selected?.length) return navigate(`/seat-selection/${scheduleId}`);
+    if (!(await askConfirm("Cancel this seat hold? These seats will become available for another customer.", "Cancel Hold"))) return;
+    try {
+      await api("/holds/release", { method: "POST", body: JSON.stringify({ schedule_id: Number(scheduleId), seat_ids: selection.selected }) }, auth);
+    } catch {}
+    sessionStorage.removeItem("ticketrush_selection");
+    navigate(`/seat-selection/${scheduleId}`);
+  }
   async function confirm() {
     if (!(await askConfirm("Confirm this ticket purchase?", "Confirm Purchase"))) return;
     setBusy(true);
@@ -926,9 +946,11 @@ function Checkout({ auth }) {
     <Page title="Checkout" icon={<CreditCard />}>
       <div className="checkout-layout">
         <div className="panel">
-          <div className="timer"><Clock3 size={18} /> Seat hold expires in <strong>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</strong></div>
+          <div className="timer"><Clock3 size={18} /> Seat hold expires in <strong>{formatHoldTime(seconds)}</strong></div>
           {error && <div className="error-banner">{error}</div>}
+          {!seconds && <div className="error-banner">Seat hold expired. These seats are now available for another customer.</div>}
           <div className="seat-list">{seats.map((seat) => <div className="seat-line" key={seat.id}><span>{seat.label} - {seat.category}</span><strong>{peso(seat.price)}</strong></div>)}</div>
+          <button className="btn-small danger" onClick={cancelHold}>Cancel Hold</button>
         </div>
         <aside className="summary-panel">
           <h2>Payment Summary</h2>
@@ -936,7 +958,7 @@ function Checkout({ auth }) {
           <div className="seat-line"><span>Service fee</span><strong>{peso(120)}</strong></div>
           <div className="total-line"><span>Total</span><strong>{peso(subtotal + 120)}</strong></div>
           <p className="muted">Payment method: Simulated Card</p>
-          <button disabled={busy || seconds === 0} onClick={confirm} className="btn wide">{busy ? "Processing..." : "Confirm Purchase"}</button>
+          <button disabled={busy || seconds === 0 || !seats.length} onClick={confirm} className="btn wide">{busy ? "Processing..." : "Confirm Purchase"}</button>
         </aside>
       </div>
     </Page>
@@ -1019,15 +1041,43 @@ function TicketDetails({ auth }) {
   );
 }
 
-function Cart() {
-  const selection = JSON.parse(sessionStorage.getItem("ticketrush_selection") || "{}");
+function Cart({ auth }) {
+  const navigate = useNavigate();
+  const [selection, setSelection] = useState(() => JSON.parse(sessionStorage.getItem("ticketrush_selection") || "{}"));
+  const [seconds, setSeconds] = useState(() => holdSecondsLeft(selection.heldUntil));
   const seats = selection.seats || [];
+  useEffect(() => {
+    const tick = () => {
+      const stored = JSON.parse(sessionStorage.getItem("ticketrush_selection") || "{}");
+      const left = holdSecondsLeft(stored.heldUntil);
+      setSelection(stored);
+      setSeconds(left);
+      if (!left && stored.selected?.length) {
+        sessionStorage.removeItem("ticketrush_selection");
+        setSelection({});
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+  async function cancelHold() {
+    if (!(await askConfirm("Cancel this cart reservation? The selected seats will become available again.", "Cancel Cart Reservation"))) return;
+    try {
+      await api("/holds/release", { method: "POST", body: JSON.stringify({ schedule_id: Number(selection.scheduleId), seat_ids: selection.selected || [] }) }, auth);
+    } catch {}
+    sessionStorage.removeItem("ticketrush_selection");
+    setSelection({});
+    navigate("/concerts");
+  }
   return (
     <Page title="My Cart" icon={<ShoppingCart />}>
       {!seats.length ? <EmptyState title="Your cart is empty" text="Held seats will appear here while they are still valid." /> : (
         <div className="summary-panel static">
+          <div className="timer"><Clock3 size={18} /> Seat hold expires in <strong>{formatHoldTime(seconds)}</strong></div>
           {seats.map((seat) => <div className="seat-line" key={seat.id}><span>{seat.label} - {seat.category}</span><strong>{peso(seat.price)}</strong></div>)}
-          <Link className="btn wide" to={`/checkout/${selection.scheduleId}`}>Continue Checkout</Link>
+          <Link className={`btn wide ${!seconds ? "disabled" : ""}`} to={seconds ? `/checkout/${selection.scheduleId}` : "/concerts"}>Continue Checkout</Link>
+          <button className="btn-small danger wide-link" onClick={cancelHold}>Cancel Reservation</button>
         </div>
       )}
     </Page>
@@ -1174,6 +1224,7 @@ function PasswordInput({ label, value, onChange, autoComplete = "current-passwor
 
 function AuthPage({ register = false }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [form, setForm] = useState({ email: "", password: "", confirm_password: "", first_name: "", last_name: "", contact_number: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1202,6 +1253,8 @@ function AuthPage({ register = false }) {
       const email = form.email.trim().toLowerCase();
       if (register) {
         await api("/auth/register", { method: "POST", body: JSON.stringify({ ...form, email }) });
+        navigate("/login", { replace: true, state: { success: "Account created successfully. Please log in to continue." } });
+        return;
       }
       const result = await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password: form.password }) });
       window.saveAuthBridge(result);
@@ -1227,6 +1280,7 @@ function AuthPage({ register = false }) {
     <Page title={register ? "Register" : "Login"} icon={<Lock />}>
       <form onSubmit={submit} className="auth-card" aria-busy={busy}>
         <div><h2>{register ? "Create your account" : "Welcome back"}</h2></div>
+        {!register && location.state?.success && <div className="success-banner" role="status">{location.state.success}</div>}
         {error && <div className="error-banner" role="alert">{error}</div>}
         {register && <div className="auth-split"><Field required autoComplete="given-name" label="First Name" value={form.first_name} disabled={busy} onChange={(e) => setForm({ ...form, first_name: e.target.value })} /><Field required autoComplete="family-name" label="Last Name" value={form.last_name} disabled={busy} onChange={(e) => setForm({ ...form, last_name: e.target.value })} /></div>}
         <Field type="email" required autoComplete="email" placeholder="Email" value={form.email} disabled={busy} onChange={(e) => setForm({ ...form, email: e.target.value })} />

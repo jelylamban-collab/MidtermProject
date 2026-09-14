@@ -58,6 +58,25 @@ def test_hold_checkout_and_idempotency():
     assert first.json()["booking_reference"] == second.json()["booking_reference"]
 
 
+def test_hold_timer_does_not_reset_and_customer_can_release_hold():
+    auth = token()
+    concerts = client.get("/concerts").json()
+    schedule_id = concerts[0]["schedule_id"]
+    seat_id = client.get(f"/schedules/{schedule_id}/seats").json()["seats"][1]["id"]
+    payload = {"schedule_id": schedule_id, "seat_ids": [seat_id]}
+    first = client.post("/holds", json=payload, headers={"Authorization": f"Bearer {auth}"})
+    second = client.post("/holds", json=payload, headers={"Authorization": f"Bearer {auth}"})
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["held_until"].replace("+00:00", "") == first.json()["held_until"].replace("+00:00", "")
+    held_seat = next(seat for seat in client.get(f"/schedules/{schedule_id}/seats").json()["seats"] if seat["id"] == seat_id)
+    assert held_seat["status"] == "held"
+    released = client.post("/holds/release", json=payload, headers={"Authorization": f"Bearer {auth}"})
+    assert released.status_code == 200, released.text
+    available_seat = next(seat for seat in client.get(f"/schedules/{schedule_id}/seats").json()["seats"] if seat["id"] == seat_id)
+    assert available_seat["status"] == "available"
+
+
 def test_safe_simulation_allows_one_winner():
     admin = token(settings.admin_email, settings.admin_password)
     concerts = client.get("/concerts").json()

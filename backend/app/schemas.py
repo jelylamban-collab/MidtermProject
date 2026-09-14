@@ -103,6 +103,11 @@ class HoldRequest(BaseModel):
     seat_ids: list[int]
 
 
+class ReleaseHoldRequest(BaseModel):
+    schedule_id: int
+    seat_ids: list[int]
+
+
 class CheckoutRequest(BaseModel):
     schedule_id: int
     seat_ids: list[int]

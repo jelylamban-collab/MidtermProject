@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import engine, get_db
 from app.models import AccountSecurityEvent, Base, ConcurrencyLog, Concert, PasswordResetRequest, Payment, Reservation, ReservationItem, Schedule, Seat, SeatCategory, SeatHold, Ticket, UploadedImage, User, Venue
-from app.schemas import CheckoutRequest, ConcertCreate, ForgotPasswordRequest, HoldRequest, LoginRequest, PasswordChange, ProfileUpdate, ResetRequestStatusUpdate, SimulationRequest, TemporaryPasswordChange, UserCreate, VenueCreate, VenueSeatingUpdate
+from app.schemas import CheckoutRequest, ConcertCreate, ForgotPasswordRequest, HoldRequest, LoginRequest, PasswordChange, ProfileUpdate, ReleaseHoldRequest, ResetRequestStatusUpdate, SimulationRequest, TemporaryPasswordChange, UserCreate, VenueCreate, VenueSeatingUpdate
 from app.security import admin_user, create_access_token, current_user, hash_password, password_change_user, verify_password
-from app.services import checkout, concert_summary, create_default_schedule_for_concert, hold_seats, run_simulation, seat_map, seed_data, ticket_pdf
+from app.services import checkout, concert_summary, create_default_schedule_for_concert, hold_seats, release_holds, run_simulation, seat_map, seed_data, ticket_pdf
 
 app = FastAPI(title="TicketRush API", version="1.0.0")
 UPLOAD_DIR = Path(__file__).resolve().parents[1] / "uploads"
@@ -292,6 +292,11 @@ def get_seats(schedule_id: int, db: Session = Depends(get_db)):
 @app.post("/holds")
 def create_hold(payload: HoldRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return hold_seats(db, user, payload.schedule_id, payload.seat_ids)
+
+
+@app.post("/holds/release")
+def release_hold(payload: ReleaseHoldRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return release_holds(db, user, payload.schedule_id, payload.seat_ids)
 
 
 @app.post("/checkout")
