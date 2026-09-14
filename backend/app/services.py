@@ -79,7 +79,6 @@ def seed_data(db: Session, admin_email: str, admin_password_hash: str, customer_
     admin = db.scalar(select(User).where(User.role == "admin").order_by(User.id))
     if admin:
         admin.email = admin_email
-        admin.hashed_password = admin_password_hash
         admin.full_name = admin.full_name or "TicketRush Admin"
     else:
         admin = User(email=admin_email, full_name="TicketRush Admin", hashed_password=admin_password_hash, role="admin")
