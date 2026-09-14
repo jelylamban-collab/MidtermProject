@@ -2474,7 +2474,7 @@ function TierCard({ tier, onSelect }) {
     <div className={`tier-card ${available <= 0 ? "inactive" : ""}`}>
       <div className="meta-line"><h3>{tier.name}</h3><StatusBadge status={available > 0 ? "Available" : "Sold Out"} /></div>
       <p>{tier.name === "VIP" ? "Priority entrance and premium section access." : tier.name === "VVIP" ? "Closest section, exclusive merchandise, soundcheck access, and commemorative pass." : "Assigned section seating with standard venue benefits."}</p>
-      <div className="seat-line"><span>Price per ticket</span><strong>{peso(tier.price)}</strong></div>
+      <div className="tier-price"><span>Price per ticket</span><strong>{peso(tier.price)}</strong></div>
       <div className="seat-line"><span>Seats</span><strong>{available} / {tier.total} available</strong></div>
       {onSelect && <button className="btn-small" disabled={available <= 0} onClick={onSelect}>Select Tier</button>}
     </div>
