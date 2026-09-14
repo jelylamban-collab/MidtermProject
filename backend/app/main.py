@@ -5,13 +5,12 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import engine, get_db
-from app.models import Base, ConcurrencyLog, Concert, Payment, Reservation, ReservationItem, Schedule, Seat, SeatCategory, SeatHold, Ticket, User, Venue
+from app.models import Base, ConcurrencyLog, Concert, Payment, Reservation, ReservationItem, Schedule, Seat, SeatCategory, SeatHold, Ticket, UploadedImage, User, Venue
 from app.schemas import CheckoutRequest, ConcertCreate, HoldRequest, LoginRequest, PasswordChange, ProfileUpdate, SimulationRequest, UserCreate, VenueCreate, VenueSeatingUpdate
 from app.security import admin_user, create_access_token, current_user, hash_password, verify_password
 from app.services import checkout, concert_summary, create_default_schedule_for_concert, hold_seats, run_simulation, seat_map, seed_data, ticket_pdf
@@ -19,7 +18,6 @@ from app.services import checkout, concert_summary, create_default_schedule_for_
 app = FastAPI(title="TicketRush API", version="1.0.0")
 UPLOAD_DIR = Path(__file__).resolve().parents[1] / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -217,7 +215,7 @@ def download_ticket(ticket_id: int, user: User = Depends(current_user), db: Sess
 
 
 @app.post("/admin/uploads")
-def upload_concert_image(file: UploadFile = File(...), _: User = Depends(admin_user)):
+def upload_concert_image(file: UploadFile = File(...), _: User = Depends(admin_user), db: Session = Depends(get_db)):
     max_upload_size = 15 * 1024 * 1024
     allowed_types = {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
     allowed_extensions = {".jpg": ".jpg", ".jpeg": ".jpg", ".png": ".png", ".webp": ".webp", ".gif": ".gif"}
@@ -228,6 +226,7 @@ def upload_concert_image(file: UploadFile = File(...), _: User = Depends(admin_u
     filename = f"{uuid.uuid4().hex}{extension}"
     target = UPLOAD_DIR / filename
     size = 0
+    chunks = []
     with target.open("wb") as buffer:
         while chunk := file.file.read(1024 * 1024):
             size += len(chunk)
@@ -236,7 +235,23 @@ def upload_concert_image(file: UploadFile = File(...), _: User = Depends(admin_u
                 target.unlink(missing_ok=True)
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, "Image must be 15 MB or smaller")
             buffer.write(chunk)
+            chunks.append(chunk)
+    db.add(UploadedImage(filename=filename, content_type=file.content_type or "application/octet-stream", data=b"".join(chunks)))
+    db.commit()
     return {"url": f"/uploads/{filename}"}
+
+
+@app.get("/uploads/{filename}")
+def uploaded_image(filename: str, db: Session = Depends(get_db)):
+    if filename != Path(filename).name:
+        raise HTTPException(404, "Image not found")
+    image = db.scalar(select(UploadedImage).where(UploadedImage.filename == filename))
+    if image:
+        return Response(image.data, media_type=image.content_type)
+    target = UPLOAD_DIR / filename
+    if target.exists() and target.is_file():
+        return Response(target.read_bytes(), media_type="application/octet-stream")
+    raise HTTPException(404, "Image not found")
 
 
 @app.get("/admin/dashboard")

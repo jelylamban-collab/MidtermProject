@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.config import settings
 from app.database import engine
-from app.models import Base, Concert
+from app.models import Base, Concert, UploadedImage
 from app.security import hash_password
 from app.services import seed_data
 from sqlalchemy.orm import Session
@@ -173,6 +173,23 @@ def test_admin_can_create_venue_and_scheduled_concert():
     seats = client.get(f"/schedules/{match['schedule_id']}/seats").json()["seats"]
     assert len(seats) == 12
     assert any(seat["category"] == "VIP" and seat["price"] == 7000.0 for seat in seats)
+
+
+def test_admin_uploads_are_served_from_database():
+    admin = token(settings.admin_email, settings.admin_password)
+    response = client.post(
+        "/admin/uploads",
+        headers={"Authorization": f"Bearer {admin}"},
+        files={"file": ("poster.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+    )
+    assert response.status_code == 200, response.text
+    filename = response.json()["url"].split("/")[-1]
+    with Session(engine) as db:
+        stored = db.query(UploadedImage).filter(UploadedImage.filename == filename).one()
+        assert stored.data == b"\x89PNG\r\n\x1a\n"
+    asset = client.get(response.json()["url"])
+    assert asset.status_code == 200
+    assert asset.content == b"\x89PNG\r\n\x1a\n"
 
 
 def test_admin_can_configure_venue_seating_before_concert():

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -165,4 +165,13 @@ class ConcurrencyLog(Base):
     waiting_ms = Column(Numeric(12, 3), nullable=False, default=0)
     duration_ms = Column(Numeric(12, 3), nullable=False, default=0)
     details = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UploadedImage(Base):
+    __tablename__ = "uploaded_images"
+    id = Column(Integer, primary_key=True)
+    filename = Column(String(255), nullable=False, unique=True, index=True)
+    content_type = Column(String(120), nullable=False)
+    data = Column(LargeBinary, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
