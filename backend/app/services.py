@@ -141,8 +141,10 @@ def seed_data(db: Session, admin_email: str, admin_password_hash: str, customer_
         if concert:
             concert.artist = item["artist"]
             concert.description = item["description"]
-            concert.poster_url = item["poster_url"]
-            concert.banner_url = item["poster_url"]
+            if not concert.poster_url or "picsum.photos" in concert.poster_url:
+                concert.poster_url = item["poster_url"]
+            if not concert.banner_url or "picsum.photos" in concert.banner_url:
+                concert.banner_url = concert.poster_url
             concert.category = item["category"]
             concert.status = "On Sale"
             concert.archived_at = None
