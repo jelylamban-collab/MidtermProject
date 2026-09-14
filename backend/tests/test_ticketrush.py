@@ -95,7 +95,7 @@ def test_ticket_pdf_download_has_embedded_qr_and_enforces_ownership():
 def test_unsafe_simulation_demonstrates_race():
     admin = token(settings.admin_email, settings.admin_password)
     concerts = client.get("/concerts").json()
-    schedule_id = concerts[2]["schedule_id"]
+    schedule_id = concerts[-1]["schedule_id"]
     seat_id = client.get(f"/schedules/{schedule_id}/seats").json()["seats"][0]["id"]
     response = client.post(
         "/admin/simulations",

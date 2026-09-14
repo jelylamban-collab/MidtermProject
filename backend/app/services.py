@@ -81,24 +81,116 @@ def seed_data(db: Session, admin_email: str, admin_password_hash: str, customer_
         admin.email = admin_email
         admin.hashed_password = admin_password_hash
         admin.full_name = admin.full_name or "TicketRush Admin"
-        db.commit()
-        return
-    admin = User(email=admin_email, full_name="TicketRush Admin", hashed_password=admin_password_hash, role="admin")
-    customer = User(
-        email="customer@ticketrush.example.com",
-        full_name="Demo Customer",
-        hashed_password=customer_password_hash or admin_password_hash,
-        role="customer",
-    )
-    venue = Venue(name="Pulse Arena", city="Manila", rows=8, seats_per_row=12)
-    db.add_all([admin, customer, venue])
-    db.flush()
-    for row_index in range(venue.rows):
-        row = chr(ord("A") + row_index)
-        category = "VIP" if row_index < 2 else "Lower Bowl" if row_index < 5 else "General"
-        for number in range(1, venue.seats_per_row + 1):
-            db.add(Seat(venue_id=venue.id, row_label=row, number=number, category_name=category))
+    else:
+        admin = User(email=admin_email, full_name="TicketRush Admin", hashed_password=admin_password_hash, role="admin")
+        db.add(admin)
 
+    customer = db.scalar(select(User).where(User.email == "customer@ticketrush.example.com"))
+    if not customer:
+        customer = User(
+            email="customer@ticketrush.example.com",
+            full_name="Demo Customer",
+            hashed_password=customer_password_hash or admin_password_hash,
+            role="customer",
+        )
+        db.add(customer)
+
+    venue = db.scalar(select(Venue).where(Venue.name == "SM Seaside Arena").order_by(Venue.id))
+    if not venue:
+        venue = Venue(name="SM Seaside Arena", city="Cebu City", rows=24, seats_per_row=12)
+        db.add(venue)
+        db.flush()
+        seat_plan = [("VVIP", 100), ("VIP", 100), ("General Admission", 83)]
+        created = 0
+        for category, count in seat_plan:
+            for _ in range(count):
+                row_index = created // venue.seats_per_row
+                number = (created % venue.seats_per_row) + 1
+                row = chr(ord("A") + row_index)
+                db.add(Seat(venue_id=venue.id, row_label=row, number=number, category_name=category))
+                created += 1
+
+    for title in ("Neon Skyline Live", "Solar Hearts Tour", "Midnight Frequency"):
+        old_concert = db.scalar(select(Concert).where(Concert.title == title))
+        if old_concert and old_concert.status != "Archived":
+            old_concert.status = "Archived"
+            old_concert.archived_at = utcnow()
+
+    demo_concerts = [
+        {
+            "title": "BTS World Tour Live in Cebu",
+            "artist": "BTS",
+            "description": "A full-scale K-pop concert experience in Cebu with premium reserved seating and arena production.",
+            "poster_url": "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=900&q=85",
+            "category": "Pop",
+            "starts_at": utcnow() + timedelta(days=18),
+            "prices": {"VVIP": Decimal("6620.00"), "VIP": Decimal("4520.00"), "General Admission": Decimal("2500.00")},
+        },
+        {
+            "title": "Bruno Mars Concert",
+            "artist": "Bruno Mars",
+            "description": "A high-energy pop and R&B concert with reserved seating and customer-friendly ticket limits.",
+            "poster_url": "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=900&q=85",
+            "category": "R&B",
+            "starts_at": utcnow() + timedelta(days=35),
+            "prices": {"VVIP": Decimal("7200.00"), "VIP": Decimal("5200.00"), "General Admission": Decimal("3200.00")},
+        },
+    ]
+    for item in demo_concerts:
+        concert = db.scalar(select(Concert).where(Concert.title == item["title"]).order_by(Concert.id))
+        if concert:
+            concert.artist = item["artist"]
+            concert.description = item["description"]
+            concert.poster_url = item["poster_url"]
+            concert.banner_url = item["poster_url"]
+            concert.category = item["category"]
+            concert.status = "On Sale"
+            concert.archived_at = None
+            concert.max_tickets_per_customer = 4
+        else:
+            concert = Concert(
+                title=item["title"],
+                artist=item["artist"],
+                description=item["description"],
+                poster_url=item["poster_url"],
+                banner_url=item["poster_url"],
+                category=item["category"],
+                status="On Sale",
+                max_tickets_per_customer=4,
+            )
+            db.add(concert)
+            db.flush()
+        schedule = db.scalar(select(Schedule).where(Schedule.concert_id == concert.id).order_by(Schedule.id))
+        if not schedule:
+            schedule = Schedule(concert_id=concert.id, venue_id=venue.id, starts_at=item["starts_at"], sale_opens_at=utcnow() - timedelta(days=2), sale_closes_at=item["starts_at"] - timedelta(days=1))
+            db.add(schedule)
+            db.flush()
+        else:
+            schedule.venue_id = venue.id
+            schedule.starts_at = item["starts_at"]
+            schedule.sale_opens_at = utcnow() - timedelta(days=2)
+            schedule.sale_closes_at = item["starts_at"] - timedelta(days=1)
+        existing_categories = {category.name: category for category in db.scalars(select(SeatCategory).where(SeatCategory.schedule_id == schedule.id)).all()}
+        for name, price in item["prices"].items():
+            if name in existing_categories:
+                existing_categories[name].price = price
+            else:
+                db.add(SeatCategory(schedule_id=schedule.id, name=name, price=price))
+
+    if not db.scalar(select(Venue).where(Venue.name == "Pulse Arena").order_by(Venue.id)):
+        legacy_venue = Venue(name="Pulse Arena", city="Manila", rows=8, seats_per_row=12)
+        db.add(legacy_venue)
+        db.flush()
+        for row_index in range(legacy_venue.rows):
+            row = chr(ord("A") + row_index)
+            category = "VIP" if row_index < 2 else "Lower Bowl" if row_index < 5 else "General"
+            for number in range(1, legacy_venue.seats_per_row + 1):
+                db.add(Seat(venue_id=legacy_venue.id, row_label=row, number=number, category_name=category))
+
+    db.commit()
+
+
+def seed_legacy_concerts(db: Session, venue: Venue):
     posters = [
         ("Neon Skyline Live", "Luna Vale", "Synth-pop anthems under moving laser canopies.", "Electronic"),
         ("Solar Hearts Tour", "The Radiant Kind", "A bright arena show with brass, percussion, and crowd choruses.", "Pop"),
@@ -106,13 +198,16 @@ def seed_data(db: Session, admin_email: str, admin_password_hash: str, customer_
     ]
     start = utcnow() + timedelta(days=21)
     for index, (title, artist, description, category) in enumerate(posters):
+        if db.scalar(select(Concert).where(Concert.title == title)):
+            continue
         concert = Concert(
             title=title,
             artist=artist,
             description=description,
             poster_url=f"https://picsum.photos/seed/ticketrush-{index}/900/1200",
             category=category,
-            status="On Sale",
+            status="Archived",
+            archived_at=utcnow(),
         )
         db.add(concert)
         db.flush()
