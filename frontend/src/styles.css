@@ -542,6 +542,13 @@ input[type="checkbox"], input[type="radio"] { flex-shrink: 0; }
 .ticket-actions { flex-wrap: wrap; gap: 10px; grid-column: 1 / -1; }
 
 .auth-card { display: grid; gap: 14px; margin: 0 auto; max-width: 440px; }
+.auth-card .auth-split { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.password-field { display: grid; position: relative; }
+.password-field .field { padding-right: 50px; }
+.password-toggle { bottom: 7px; min-height: 32px; position: absolute; right: 8px; width: 34px; }
+.password-rules { background: rgb(0 0 0 / .16); border: 1px solid rgb(255 255 255 / .1); border-radius: 8px; display: grid; gap: 8px; padding: 12px; }
+.password-rules span { align-items: center; color: rgb(255 255 255 / .62); display: flex; font-size: 13px; gap: 8px; }
+.password-rules span.met { color: #bcffdc; }
 .field { background: rgb(255 255 255 / .08); border: 1px solid rgb(255 255 255 / .14); border-radius: 8px; color: white; min-height: 46px; outline: none; padding: 10px 12px; width: 100%; }
 .field:focus { border-color: rgb(255 138 42 / .62); }
 .field option { color: #15131a; }
@@ -567,6 +574,15 @@ input[type="checkbox"], input[type="radio"] { flex-shrink: 0; }
 .admin-toolbar .btn-small { min-height: 46px; white-space: nowrap; width: fit-content; }
 .admin-toolbar .field { min-width: 0; }
 .admin-toolbar .search-field { max-width: none; width: 100%; }
+.modal-headline { align-items: center; display: flex; gap: 16px; justify-content: space-between; }
+.modal-headline h2 { margin: 0 0 4px; }
+.customer-detail-modal, .temp-password-modal { display: grid; gap: 16px; }
+.request-row { align-items: center; border-bottom: 1px solid rgb(255 255 255 / .1); display: flex; gap: 14px; justify-content: space-between; padding: 12px 0; }
+.request-row:last-child { border-bottom: 0; }
+.request-row strong, .request-row span { display: block; }
+.request-row span { color: rgb(255 255 255 / .6); font-size: 13px; margin-top: 3px; }
+.copy-box { align-items: center; background: rgb(255 255 255 / .08); border: 1px solid rgb(255 138 42 / .28); border-radius: 8px; display: flex; gap: 12px; justify-content: space-between; padding: 14px; }
+.copy-box code { color: #fff; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
 .table-poster { aspect-ratio: 2 / 3; border: 1px solid rgb(255 255 255 / .14); border-radius: 7px; box-shadow: 0 10px 28px rgb(0 0 0 / .28); height: 74px; object-fit: cover; width: 52px; }
 .venue-thumb { aspect-ratio: 1; width: 58px; }
 .venue-icon-cell, .image-placeholder { align-items: center; background: rgb(255 255 255 / .08); border: 1px solid rgb(255 255 255 / .12); border-radius: 8px; color: rgb(255 255 255 / .7); display: inline-flex; font-size: 12px; min-height: 42px; justify-content: center; padding: 8px; width: 58px; }
@@ -849,6 +865,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 @container (max-width: 580px) {
   .concert-grid, .tier-list, .admin-tier-list, .chart-grid, .admin-form, .control-panel, .notice-list, .two-column, .info-flow, .concert-days-grid, .price-grid, .tier-price-row, .tier-seat-row { grid-template-columns: minmax(0, 1fr); }
+  .auth-card .auth-split { grid-template-columns: minmax(0, 1fr); }
   .ticket-card, .ticket-card.large { grid-template-columns: minmax(0, 1fr); }
   .ticket-card .qr-box { width: 220px; }
   .ticket-card .info-grid { grid-template-columns: minmax(0, 1fr); }
@@ -917,6 +934,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .stat-grid.event-stats { grid-template-columns: minmax(0, 1fr); }
   .confirm-backdrop { padding: 16px; }
   .confirm-actions > * { flex: 1 1 120px; }
+  .modal-headline, .request-row, .copy-box { align-items: stretch; flex-direction: column; }
   .page-head h1 { font-size: 26px; }
   .image-upload-preview { max-height: 220px; }
   .seat-map-panel, .summary-panel, .admin-form, .data-panel { padding: 16px; }

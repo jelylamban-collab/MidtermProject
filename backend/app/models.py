@@ -16,6 +16,10 @@ class User(Base):
     account_status = Column(String(40), nullable=False, default="Active")
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     hashed_password = Column(String(255), nullable=False)
+    force_password_change = Column(Integer, nullable=False, default=0)
+    temporary_password_expires_at = Column(DateTime(timezone=True), nullable=True)
+    temporary_password_used_at = Column(DateTime(timezone=True), nullable=True)
+    session_version = Column(Integer, nullable=False, default=1)
     role = Column(String(32), nullable=False, default="customer")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -175,3 +179,28 @@ class UploadedImage(Base):
     content_type = Column(String(120), nullable=False)
     data = Column(LargeBinary, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PasswordResetRequest(Base):
+    __tablename__ = "password_reset_requests"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    email = Column(String(255), nullable=False, index=True)
+    status = Column(String(40), nullable=False, default="Pending")
+    processed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    user = relationship("User", foreign_keys=[user_id])
+    processed_by = relationship("User", foreign_keys=[processed_by_id])
+
+
+class AccountSecurityEvent(Base):
+    __tablename__ = "account_security_events"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    event_type = Column(String(80), nullable=False)
+    details = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    user = relationship("User", foreign_keys=[user_id])
+    actor = relationship("User", foreign_keys=[actor_id])

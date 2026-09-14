@@ -1,3 +1,6 @@
+import secrets
+import string
+import time
 import uuid
 import json
 from datetime import datetime, timedelta, timezone
@@ -10,9 +13,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import engine, get_db
-from app.models import Base, ConcurrencyLog, Concert, Payment, Reservation, ReservationItem, Schedule, Seat, SeatCategory, SeatHold, Ticket, UploadedImage, User, Venue
-from app.schemas import CheckoutRequest, ConcertCreate, HoldRequest, LoginRequest, PasswordChange, ProfileUpdate, SimulationRequest, UserCreate, VenueCreate, VenueSeatingUpdate
-from app.security import admin_user, create_access_token, current_user, hash_password, verify_password
+from app.models import AccountSecurityEvent, Base, ConcurrencyLog, Concert, PasswordResetRequest, Payment, Reservation, ReservationItem, Schedule, Seat, SeatCategory, SeatHold, Ticket, UploadedImage, User, Venue
+from app.schemas import CheckoutRequest, ConcertCreate, ForgotPasswordRequest, HoldRequest, LoginRequest, PasswordChange, ProfileUpdate, ResetRequestStatusUpdate, SimulationRequest, TemporaryPasswordChange, UserCreate, VenueCreate, VenueSeatingUpdate
+from app.security import admin_user, create_access_token, current_user, hash_password, password_change_user, verify_password
 from app.services import checkout, concert_summary, create_default_schedule_for_concert, hold_seats, run_simulation, seat_map, seed_data, ticket_pdf
 
 app = FastAPI(title="TicketRush API", version="1.0.0")
@@ -25,6 +28,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+RESET_ATTEMPTS: dict[str, list[float]] = {}
+
+
+def check_rate_limit(bucket: dict[str, list[float]], key: str, limit: int, window_seconds: int, message: str):
+    now = time.time()
+    attempts = [stamp for stamp in bucket.get(key, []) if now - stamp < window_seconds]
+    if len(attempts) >= limit:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, message)
+    attempts.append(now)
+    bucket[key] = attempts
+
+
+def rate_limit_count(bucket: dict[str, list[float]], key: str, limit: int, window_seconds: int, message: str):
+    now = time.time()
+    attempts = [stamp for stamp in bucket.get(key, []) if now - stamp < window_seconds]
+    bucket[key] = attempts
+    if len(attempts) >= limit:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, message)
+
+
+def record_rate_limit_failure(bucket: dict[str, list[float]], key: str):
+    bucket.setdefault(key, []).append(time.time())
+
+
+def password_errors(password: str) -> list[str]:
+    checks = [
+        (len(password) >= 8, "At least eight characters"),
+        (any(char.isupper() for char in password), "At least one uppercase letter"),
+        (any(char.islower() for char in password), "At least one lowercase letter"),
+        (any(char.isdigit() for char in password), "At least one number"),
+        (any(char in string.punctuation for char in password), "At least one special character"),
+    ]
+    return [text for ok, text in checks if not ok]
+
+
+def require_strong_password(password: str):
+    errors = password_errors(password)
+    if errors:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password must include: " + ", ".join(errors))
+
+
+def generate_temporary_password() -> str:
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(16))
+        if not password_errors(password):
+            return password
+
+
+def security_event(db: Session, user: User, event_type: str, details: str = "", actor: User | None = None):
+    db.add(AccountSecurityEvent(user_id=user.id, actor_id=actor.id if actor else None, event_type=event_type, details=details))
 
 
 @app.on_event("startup")
@@ -66,6 +121,14 @@ def ensure_optional_media_columns():
             connection.execute(text("ALTER TABLE users ADD COLUMN account_status VARCHAR(40) NOT NULL DEFAULT 'Active'"))
         if "last_login_at" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN last_login_at DATETIME"))
+        if "force_password_change" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN force_password_change INTEGER NOT NULL DEFAULT 0"))
+        if "temporary_password_expires_at" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN temporary_password_expires_at DATETIME"))
+        if "temporary_password_used_at" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN temporary_password_used_at DATETIME"))
+        if "session_version" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1"))
 
 
 @app.get("/health")
@@ -75,9 +138,18 @@ def health():
 
 @app.post("/auth/register")
 def register(payload: UserCreate, db: Session = Depends(get_db)):
-    if db.scalar(select(User).where(User.email == payload.email)):
+    email = payload.email.lower().strip()
+    first_name = (payload.first_name or "").strip()
+    last_name = (payload.last_name or "").strip()
+    full_name = (payload.full_name or f"{first_name} {last_name}").strip()
+    if not full_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "First name and last name are required")
+    if payload.confirm_password is not None and payload.password != payload.confirm_password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Passwords do not match")
+    require_strong_password(payload.password)
+    if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
-    user = User(email=payload.email, full_name=payload.full_name, hashed_password=hash_password(payload.password), role="customer")
+    user = User(email=email, full_name=full_name, contact_number=(payload.contact_number or "").strip(), hashed_password=hash_password(payload.password), role="customer")
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -86,9 +158,30 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/auth/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == payload.email))
+    email = payload.email.lower().strip()
+    rate_limit_count(LOGIN_ATTEMPTS, email, 8, 300, "Too many login attempts. Please wait a moment and try again.")
+    user = db.scalar(select(User).where(User.email == email))
     if not user or not verify_password(payload.password, user.hashed_password):
+        record_rate_limit_failure(LOGIN_ATTEMPTS, email)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    if user.force_password_change:
+        now = datetime.now(timezone.utc)
+        expires_at = user.temporary_password_expires_at
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at and expires_at <= now:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Temporary password expired")
+        if user.temporary_password_used_at:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Temporary password no longer valid")
+        user.temporary_password_used_at = now
+        user.last_login_at = now
+        db.commit()
+        return {
+            "access_token": create_access_token(user, purpose="password_change"),
+            "token_type": "bearer",
+            "must_change_password": True,
+            "user": {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "profile_photo_url": user.profile_photo_url},
+        }
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
     return {
@@ -96,6 +189,36 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         "token_type": "bearer",
         "user": {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "profile_photo_url": user.profile_photo_url},
     }
+
+
+@app.post("/auth/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    email = payload.email.lower().strip()
+    check_rate_limit(RESET_ATTEMPTS, email, 3, 3600, "Request received")
+    user = db.scalar(select(User).where(User.email == email, User.role == "customer"))
+    request = PasswordResetRequest(user_id=user.id if user else None, email=email, status="Pending")
+    db.add(request)
+    if user:
+        security_event(db, user, "Password reset requested", "Customer submitted a forgot-password request.")
+    db.commit()
+    return {"message": "Request received"}
+
+
+@app.post("/auth/create-new-password")
+def create_new_password(payload: TemporaryPasswordChange, user: User = Depends(password_change_user), db: Session = Depends(get_db)):
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Passwords do not match")
+    require_strong_password(payload.new_password)
+    if verify_password(payload.new_password, user.hashed_password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "New password cannot match the temporary password")
+    user.hashed_password = hash_password(payload.new_password)
+    user.force_password_change = 0
+    user.temporary_password_expires_at = None
+    user.temporary_password_used_at = None
+    user.session_version = (user.session_version or 1) + 1
+    security_event(db, user, "Password successfully changed", "Customer created a permanent password.")
+    db.commit()
+    return {"updated": True}
 
 
 @app.get("/me")
@@ -131,7 +254,10 @@ def update_me(payload: ProfileUpdate, user: User = Depends(current_user), db: Se
 def update_password(payload: PasswordChange, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if not verify_password(payload.current_password, user.hashed_password):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
+    require_strong_password(payload.new_password)
     user.hashed_password = hash_password(payload.new_password)
+    user.session_version = (user.session_version or 1) + 1
+    security_event(db, user, "Password successfully changed", "Customer changed password from profile.")
     db.commit()
     return {"updated": True}
 
@@ -416,7 +542,108 @@ def admin_delete_concert(concert_id: int, _: User = Depends(admin_user), db: Ses
 
 @app.get("/admin/customers")
 def admin_customers(_: User = Depends(admin_user), db: Session = Depends(get_db)):
-    return db.query(User).filter(User.role == "customer").all()
+    customers = db.query(User).filter(User.role == "customer").order_by(User.created_at.desc()).all()
+    rows = []
+    for customer in customers:
+        latest_request = db.scalar(
+            select(PasswordResetRequest)
+            .where(PasswordResetRequest.user_id == customer.id)
+            .order_by(PasswordResetRequest.created_at.desc())
+        )
+        rows.append({
+            "id": customer.id,
+            "email": customer.email,
+            "full_name": customer.full_name,
+            "contact_number": customer.contact_number or "",
+            "account_status": customer.account_status,
+            "reset_request_status": latest_request.status if latest_request else "None",
+            "force_password_change": bool(customer.force_password_change),
+            "created_at": customer.created_at,
+            "last_login_at": customer.last_login_at,
+        })
+    return rows
+
+
+@app.get("/admin/customers/{customer_id}")
+def admin_customer_detail(customer_id: int, _: User = Depends(admin_user), db: Session = Depends(get_db)):
+    customer = db.get(User, customer_id)
+    if not customer or customer.role != "customer":
+        raise HTTPException(404, "Customer not found")
+    requests = db.scalars(select(PasswordResetRequest).where(PasswordResetRequest.user_id == customer.id).order_by(PasswordResetRequest.created_at.desc())).all()
+    events = db.scalars(select(AccountSecurityEvent).where(AccountSecurityEvent.user_id == customer.id).order_by(AccountSecurityEvent.created_at.desc())).all()
+    return {
+        "id": customer.id,
+        "email": customer.email,
+        "full_name": customer.full_name,
+        "contact_number": customer.contact_number or "",
+        "account_status": customer.account_status,
+        "force_password_change": bool(customer.force_password_change),
+        "temporary_password_expires_at": customer.temporary_password_expires_at,
+        "created_at": customer.created_at,
+        "last_login_at": customer.last_login_at,
+        "reset_requests": [{
+            "id": row.id,
+            "email": row.email,
+            "status": row.status,
+            "processed_by": row.processed_by.full_name if row.processed_by else "",
+            "completed_at": row.completed_at,
+            "created_at": row.created_at,
+        } for row in requests],
+        "security_history": [{
+            "id": row.id,
+            "event_type": row.event_type,
+            "details": row.details,
+            "administrator": row.actor.full_name if row.actor else "",
+            "created_at": row.created_at,
+        } for row in events],
+    }
+
+
+@app.put("/admin/password-reset-requests/{request_id}")
+def admin_update_reset_request(request_id: int, payload: ResetRequestStatusUpdate, admin: User = Depends(admin_user), db: Session = Depends(get_db)):
+    request = db.get(PasswordResetRequest, request_id)
+    if not request:
+        raise HTTPException(404, "Password reset request not found")
+    request.status = payload.status
+    request.processed_by_id = admin.id
+    request.completed_at = datetime.now(timezone.utc) if payload.status != "Pending" else None
+    if request.user_id:
+        user = db.get(User, request.user_id)
+        if user:
+            security_event(db, user, f"Password reset request {payload.status.lower()}", f"Request #{request.id} marked {payload.status}.", admin)
+    db.commit()
+    return {"updated": True}
+
+
+@app.post("/admin/customers/{customer_id}/reset-password")
+def admin_reset_customer_password(customer_id: int, admin: User = Depends(admin_user), db: Session = Depends(get_db)):
+    customer = db.get(User, customer_id)
+    if not customer or customer.role != "customer":
+        raise HTTPException(404, "Customer not found")
+    temporary_password = generate_temporary_password()
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.temporary_password_hours)
+    customer.hashed_password = hash_password(temporary_password)
+    customer.force_password_change = 1
+    customer.temporary_password_expires_at = expires_at
+    customer.temporary_password_used_at = None
+    customer.session_version = (customer.session_version or 1) + 1
+    latest_request = db.scalar(
+        select(PasswordResetRequest)
+        .where(PasswordResetRequest.user_id == customer.id, PasswordResetRequest.status == "Pending")
+        .order_by(PasswordResetRequest.created_at.desc())
+    )
+    if latest_request:
+        latest_request.status = "Processed"
+        latest_request.processed_by_id = admin.id
+        latest_request.completed_at = datetime.now(timezone.utc)
+    security_event(db, customer, "Temporary password generated", f"Expires at {expires_at.isoformat()}.", admin)
+    db.commit()
+    return {
+        "customer_name": customer.full_name,
+        "customer_email": customer.email,
+        "temporary_password": temporary_password,
+        "expires_at": expires_at,
+    }
 
 
 @app.get("/admin/reservations")

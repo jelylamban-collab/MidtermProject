@@ -443,3 +443,65 @@ def test_public_listing_repairs_concert_without_schedule():
     assert match is not None
     assert match["schedule_id"]
     assert match["available_seats"] > 0
+
+
+def test_admin_temporary_password_reset_flow():
+    email = "reset-flow@example.com"
+    created = client.post(
+        "/auth/register",
+        json={
+            "first_name": "Reset",
+            "last_name": "Customer",
+            "contact_number": "09170000000",
+            "email": email,
+            "password": "Password123!",
+            "confirm_password": "Password123!",
+        },
+    )
+    assert created.status_code == 200, created.text
+    original_auth = token(email, "Password123!")
+
+    forgot = client.post("/auth/forgot-password", json={"email": email})
+    assert forgot.status_code == 200, forgot.text
+    unknown = client.post("/auth/forgot-password", json={"email": "unknown-reset@example.com"})
+    assert unknown.status_code == 200, unknown.text
+    assert unknown.json()["message"] == forgot.json()["message"]
+
+    admin = token(settings.admin_email, settings.admin_password)
+    customers = client.get("/admin/customers", headers={"Authorization": f"Bearer {admin}"}).json()
+    customer = next(row for row in customers if row["email"] == email)
+    assert customer["reset_request_status"] == "Pending"
+
+    generated = client.post(f"/admin/customers/{customer['id']}/reset-password", headers={"Authorization": f"Bearer {admin}"})
+    assert generated.status_code == 200, generated.text
+    temporary_password = generated.json()["temporary_password"]
+    assert temporary_password
+    assert "hashed" not in generated.text.lower()
+
+    old_session = client.get("/tickets", headers={"Authorization": f"Bearer {original_auth}"})
+    assert old_session.status_code == 401
+    old_login = client.post("/auth/login", json={"email": email, "password": "Password123!"})
+    assert old_login.status_code == 401
+
+    temp_login = client.post("/auth/login", json={"email": email, "password": temporary_password})
+    assert temp_login.status_code == 200, temp_login.text
+    temp_payload = temp_login.json()
+    assert temp_payload["must_change_password"] is True
+    blocked = client.get("/tickets", headers={"Authorization": f"Bearer {temp_payload['access_token']}"})
+    assert blocked.status_code == 403
+    reused = client.post("/auth/login", json={"email": email, "password": temporary_password})
+    assert reused.status_code == 403
+
+    weak = client.post(
+        "/auth/create-new-password",
+        json={"new_password": "weakpass", "confirm_password": "weakpass"},
+        headers={"Authorization": f"Bearer {temp_payload['access_token']}"},
+    )
+    assert weak.status_code == 400
+    updated = client.post(
+        "/auth/create-new-password",
+        json={"new_password": "NewPassword123!", "confirm_password": "NewPassword123!"},
+        headers={"Authorization": f"Bearer {temp_payload['access_token']}"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert token(email, "NewPassword123!")

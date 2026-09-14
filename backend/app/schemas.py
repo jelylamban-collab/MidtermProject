@@ -6,8 +6,12 @@ from pydantic import BaseModel, EmailStr, Field
 
 class UserCreate(BaseModel):
     email: EmailStr
-    full_name: str = Field(min_length=2, max_length=255)
+    full_name: str | None = Field(default=None, max_length=255)
+    first_name: str | None = Field(default=None, max_length=120)
+    last_name: str | None = Field(default=None, max_length=120)
+    contact_number: str | None = Field(default="", max_length=40)
     password: str = Field(min_length=8)
+    confirm_password: str | None = Field(default=None, min_length=8)
 
 
 class LoginRequest(BaseModel):
@@ -32,6 +36,19 @@ class ProfileUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=8)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class TemporaryPasswordChange(BaseModel):
+    new_password: str = Field(min_length=8)
+    confirm_password: str = Field(min_length=8)
+
+
+class ResetRequestStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(Pending|Processed|Cancelled)$")
 
 
 class PolicyRuleInput(BaseModel):

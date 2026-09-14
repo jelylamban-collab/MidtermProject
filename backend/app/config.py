@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-only-change-me"
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 120
+    temporary_password_hours: int = 24
     cors_origins: str = "http://localhost:5173"
     admin_email: str = "admin@gmail.com"
     admin_password: str = "Admin123"

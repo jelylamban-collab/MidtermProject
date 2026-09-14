@@ -13,8 +13,10 @@ import {
   Download,
   FileDown,
   Eye,
+  EyeOff,
   Gauge,
   History,
+  KeyRound,
   LayoutDashboard,
   Lock,
   LogOut,
@@ -259,7 +261,7 @@ function BrandLogo({ compact = false }) {
 
 function Feedback({ message }) {
   if (!message) return null;
-  const isError = /failed|must|required|could not|invalid|incorrect|only|smaller|convert|error/i.test(message);
+  const isError = /failed|must|required|could not|invalid|incorrect|only|smaller|convert|error|do not match|weak|expired|no longer/i.test(message);
   return <div className={isError ? "error-banner" : "success-banner"}>{message}</div>;
 }
 
@@ -400,6 +402,8 @@ function Shell({ auth, logout }) {
             <Route path="/admin/customers" element={<AdminOnly auth={auth}><AdminCustomers auth={auth} /></AdminOnly>} />
             <Route path="/admin/reports" element={<AdminOnly auth={auth}><AdminReports auth={auth} /></AdminOnly>} />
             <Route path="/admin/profile" element={<AdminOnly auth={auth}><AdminProfile auth={auth} /></AdminOnly>} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/create-new-password" element={<CreateNewPasswordPage auth={auth} />} />
             <Route path="/admin/simulation" element={<Navigate to="/admin/reports" />} />
             <Route path="/admin/logs" element={<Navigate to="/admin/transactions" />} />
             <Route path="/access-denied" element={<AccessDenied />} />
@@ -451,6 +455,8 @@ function Shell({ auth, logout }) {
         <Route path="/profile" element={<CustomerOnly auth={auth}><Profile auth={auth} /></CustomerOnly>} />
         <Route path="/login" element={<AuthPage />} />
         <Route path="/register" element={<AuthPage register />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/create-new-password" element={<CreateNewPasswordPage auth={auth} />} />
         <Route path="/admin" element={<AdminOnly auth={auth}><AdminDashboard auth={auth} /></AdminOnly>} />
         <Route path="/admin/concerts" element={<AdminOnly auth={auth}><AdminConcerts auth={auth} /></AdminOnly>} />
         <Route path="/admin/concerts/view/:scheduleId" element={<AdminOnly auth={auth}><ConcertDetails admin /></AdminOnly>} />
@@ -534,11 +540,13 @@ function Protected({ auth, children }) {
 
 function CustomerOnly({ auth, children }) {
   if (!auth) return <Navigate to="/login" />;
+  if (auth.must_change_password) return <Navigate to="/create-new-password" />;
   return auth.user.role === "customer" ? children : <AccessDenied />;
 }
 
 function AdminOnly({ auth, children }) {
   if (!auth) return <Navigate to="/login" />;
+  if (auth.must_change_password) return <Navigate to="/create-new-password" />;
   return auth.user.role === "admin" ? children : <AccessDenied />;
 }
 
@@ -1138,38 +1146,77 @@ function Profile({ auth }) {
   );
 }
 
+const passwordRules = [
+  ["length", "At least eight characters", (value) => value.length >= 8],
+  ["upper", "At least one uppercase letter", (value) => /[A-Z]/.test(value)],
+  ["lower", "At least one lowercase letter", (value) => /[a-z]/.test(value)],
+  ["number", "At least one number", (value) => /\d/.test(value)],
+  ["special", "At least one special character", (value) => /[^A-Za-z0-9]/.test(value)],
+];
+
+function strongPassword(value) {
+  return passwordRules.every(([, , test]) => test(value || ""));
+}
+
+function PasswordRequirements({ value }) {
+  return <div className="password-rules" aria-label="Password requirements">
+    {passwordRules.map(([id, text, test]) => <span key={id} className={test(value || "") ? "met" : ""}>{test(value || "") ? <ShieldCheck size={14} /> : <Lock size={14} />}{text}</span>)}
+  </div>;
+}
+
+function PasswordInput({ label, value, onChange, autoComplete = "current-password", disabled = false }) {
+  const [visible, setVisible] = useState(false);
+  return <div className="password-field">
+    <Field label={label} type={visible ? "text" : "password"} required minLength={8} autoComplete={autoComplete} value={value} disabled={disabled} onChange={onChange} />
+    <button type="button" className="icon-btn password-toggle" disabled={disabled} aria-label={visible ? "Hide password" : "Show password"} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={18} /> : <Eye size={18} />}</button>
+  </div>;
+}
+
 function AuthPage({ register = false }) {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: "", password: "", full_name: "" });
+  const [form, setForm] = useState({ email: "", password: "", confirm_password: "", first_name: "", last_name: "", contact_number: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [createdEmail, setCreatedEmail] = useState("");
   async function submit(event) {
     event.preventDefault();
     if (busy) return;
     setError("");
-    if (register && form.full_name.trim().length < 2) {
-      setError("Please enter your full name.");
+    if (register && (!form.first_name.trim() || !form.last_name.trim() || !form.contact_number.trim())) {
+      setError("Please complete all required fields.");
       return;
     }
-    if (!form.email.includes("@") || form.password.length < 8) {
-      setError("Please enter a valid email and a password with at least 8 characters.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (register && !strongPassword(form.password)) {
+      setError("Password must satisfy all listed requirements.");
+      return;
+    }
+    if (register && form.password !== form.confirm_password) {
+      setError("Passwords do not match. Please make sure that both password fields contain the same password.");
       return;
     }
     setBusy(true);
     try {
-      if (register && createdEmail !== form.email.trim()) {
-        await api("/auth/register", { method: "POST", body: JSON.stringify({ ...form, email: form.email.trim(), full_name: form.full_name.trim() }) });
-        setCreatedEmail(form.email.trim());
+      const email = form.email.trim().toLowerCase();
+      if (register) {
+        await api("/auth/register", { method: "POST", body: JSON.stringify({ ...form, email }) });
       }
-      const result = await api("/auth/login", { method: "POST", body: JSON.stringify(form) });
+      const result = await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password: form.password }) });
       window.saveAuthBridge(result);
+      if (result.must_change_password) {
+        navigate("/create-new-password");
+        return;
+      }
       const returnTo = sessionStorage.getItem("ticketrush_return_to");
       sessionStorage.removeItem("ticketrush_return_to");
       navigate(result.user.role === "admin" ? "/admin" : returnTo || "/concerts");
     } catch (error) {
       const message = error.message || "";
       if (register && /registered|409/i.test(message)) setError("This email already has a TicketRush account. Please log in instead.");
+      else if (/Temporary password expired/i.test(message)) setError("Temporary password expired. This temporary password is no longer valid. Please request a new password reset from the TicketRush administrator.");
+      else if (/Temporary password no longer valid/i.test(message)) setError("Temporary password no longer valid. This one-time password has already been used or replaced. Please contact the TicketRush administrator for assistance.");
       else if (/fetch|network/i.test(message)) setError("Unable to reach TicketRush. Please wait a moment and try again.");
       else setError(message || "Could not complete your request. Please try again.");
     } finally {
@@ -1180,16 +1227,87 @@ function AuthPage({ register = false }) {
     <Page title={register ? "Register" : "Login"} icon={<Lock />}>
       <form onSubmit={submit} className="auth-card" aria-busy={busy}>
         <div><h2>{register ? "Create your account" : "Welcome back"}</h2></div>
-        {createdEmail && error && <p role="status">Your account was created. Sign in to continue.</p>}
         {error && <div className="error-banner" role="alert">{error}</div>}
-        {register && <Field required autoComplete="name" minLength={2} placeholder="Full name" value={form.full_name} disabled={busy} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />}
+        {register && <div className="auth-split"><Field required autoComplete="given-name" label="First Name" value={form.first_name} disabled={busy} onChange={(e) => setForm({ ...form, first_name: e.target.value })} /><Field required autoComplete="family-name" label="Last Name" value={form.last_name} disabled={busy} onChange={(e) => setForm({ ...form, last_name: e.target.value })} /></div>}
         <Field type="email" required autoComplete="email" placeholder="Email" value={form.email} disabled={busy} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <Field type="password" required minLength={8} autoComplete={register ? "new-password" : "current-password"} placeholder="Password" value={form.password} disabled={busy} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        {register && <Field required autoComplete="tel" label="Contact Number" value={form.contact_number} disabled={busy} onChange={(e) => setForm({ ...form, contact_number: e.target.value })} />}
+        <PasswordInput label="Password" value={form.password} disabled={busy} autoComplete={register ? "new-password" : "current-password"} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        {register && <><PasswordInput label="Confirm Password" value={form.confirm_password} disabled={busy} autoComplete="new-password" onChange={(e) => setForm({ ...form, confirm_password: e.target.value })} /><PasswordRequirements value={form.password} /></>}
         <button className="btn wide" disabled={busy}>{busy ? (register ? "Creating..." : "Logging in...") : (register ? "Create Account" : "Login")}</button>
+        {!register && <Link className="muted center" to="/forgot-password">Forgot Password?</Link>}
         <Link className="muted center" to={register ? "/login" : "/register"}>{register ? "Already have an account?" : "Need an account?"}</Link>
       </form>
     </Page>
   );
+}
+
+function ForgotPasswordPage() {
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event) {
+    event.preventDefault();
+    if (busy) return;
+    setError("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: email.trim().toLowerCase() }) });
+      setSubmitted(true);
+    } catch {
+      setSubmitted(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <Page title="Forgot Password" icon={<KeyRound />}>
+    <form className="auth-card" onSubmit={submit}>
+      <div><h2>{submitted ? "Request received" : "Forgot your password?"}</h2><p>{submitted ? "If the email matches a TicketRush account, the administrator can assist with resetting its password." : "Enter the email address connected to your TicketRush account. Please contact the TicketRush administrator to request a temporary password."}</p></div>
+      {!submitted && <><Feedback message={error} /><Field type="email" required autoComplete="email" label="Email Address" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} /><button className="btn wide" disabled={busy}>{busy ? "Submitting..." : "Submit Request"}</button></>}
+      {submitted && <Link className="btn wide" to="/login">Back to Login</Link>}
+    </form>
+  </Page>;
+}
+
+function CreateNewPasswordPage({ auth }) {
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ new_password: "", confirm_password: "" });
+  const [message, setMessage] = useState("");
+  const [done, setDone] = useState(false);
+  async function submit(event) {
+    event.preventDefault();
+    if (form.new_password !== form.confirm_password) {
+      setMessage("Passwords do not match. Please enter the same password in both fields.");
+      return;
+    }
+    if (!strongPassword(form.new_password)) {
+      setMessage("Password must satisfy all listed requirements.");
+      return;
+    }
+    try {
+      await api("/auth/create-new-password", { method: "POST", body: JSON.stringify(form) }, auth);
+      window.saveAuthBridge(null);
+      setDone(true);
+    } catch (error) {
+      setMessage(error.message || "Password could not be updated.");
+    }
+  }
+  if (done) return <Page title="Password Updated" icon={<ShieldCheck />}><div className="success-panel"><h2>Password updated successfully</h2><p>Your new password has been saved. You may now log in to your TicketRush account.</p><button className="btn" onClick={() => navigate("/login")}>Continue to Login</button></div></Page>;
+  if (!auth?.must_change_password) return <Navigate to="/login" />;
+  return <Page title="Create New Password" icon={<KeyRound />}>
+    <form className="auth-card" onSubmit={submit}>
+      <div><h2>Create a new password</h2><p>For your account's security, create a new password before continuing to TicketRush.</p></div>
+      <Feedback message={message} />
+      <PasswordInput label="New Password" value={form.new_password} autoComplete="new-password" onChange={(event) => setForm({ ...form, new_password: event.target.value })} />
+      <PasswordInput label="Confirm New Password" value={form.confirm_password} autoComplete="new-password" onChange={(event) => setForm({ ...form, confirm_password: event.target.value })} />
+      <PasswordRequirements value={form.new_password} />
+      <button className="btn wide">Save New Password</button>
+    </form>
+  </Page>;
 }
 
 function AdminDashboard({ auth }) {
@@ -2157,8 +2275,88 @@ function AdminReservations({ auth }) {
 
 function AdminCustomers({ auth }) {
   const [rows, setRows] = useState([]);
-  useEffect(() => { api("/admin/customers", {}, auth).then(setRows); }, [auth]);
-  return <Page title="Customers" icon={<Users />}><AdminLinks /><Table rows={rows} columns={["id", "email", "full_name", "role", "created_at"]} searchable /></Page>;
+  const [selected, setSelected] = useState(null);
+  const [filters, setFilters] = useState({ q: "", status: "", reset: "" });
+  const [message, setMessage] = useState("");
+  const [tempPassword, setTempPassword] = useState(null);
+  const loadRows = () => api("/admin/customers", {}, auth).then(setRows).catch((error) => setMessage(error.message || "Customers could not be loaded."));
+  useEffect(() => { loadRows(); }, [auth]);
+  const filtered = rows.filter((row) =>
+    (!filters.q || `${row.full_name} ${row.email} ${row.contact_number}`.toLowerCase().includes(filters.q.toLowerCase())) &&
+    (!filters.status || row.account_status === filters.status) &&
+    (!filters.reset || row.reset_request_status === filters.reset)
+  );
+  async function openCustomer(row) {
+    setMessage("");
+    try {
+      setSelected(await api(`/admin/customers/${row.id}`, {}, auth));
+    } catch (error) {
+      setMessage(error.message || "Customer details could not be loaded.");
+    }
+  }
+  async function resetPassword(customer = selected) {
+    if (!customer) return;
+    const ok = await askConfirm(
+      `This will create a temporary password for ${customer.full_name}. The customer's current password will no longer work, and the customer must create a new password during the next login.`,
+      "Reset customer password?"
+    );
+    if (!ok) return;
+    try {
+      const result = await api(`/admin/customers/${customer.id}/reset-password`, { method: "POST" }, auth);
+      setTempPassword(result);
+      setSelected(null);
+      loadRows();
+    } catch (error) {
+      setMessage(error.message || "Temporary password could not be generated.");
+    }
+  }
+  async function updateRequest(request, status) {
+    try {
+      await api(`/admin/password-reset-requests/${request.id}`, { method: "PUT", body: JSON.stringify({ status }) }, auth);
+      setSelected(await api(`/admin/customers/${selected.id}`, {}, auth));
+      loadRows();
+    } catch (error) {
+      setMessage(error.message || "Request could not be updated.");
+    }
+  }
+  return <Page title="Customers" icon={<Users />}>
+    <AdminLinks />
+    <Feedback message={message} />
+    <div className="admin-toolbar">
+      <SearchField value={filters.q} setValue={(q) => setFilters({ ...filters, q })} />
+      <Field as="select" label="Account Status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option>Active</option><option>Suspended</option></Field>
+      <Field as="select" label="Password Reset" value={filters.reset} onChange={(e) => setFilters({ ...filters, reset: e.target.value })}><option value="">All reset requests</option><option>Pending</option><option>Processed</option><option>Cancelled</option><option>None</option></Field>
+      <button className="btn-small" onClick={() => setFilters({ q: "", status: "", reset: "" })}>Clear Filters</button>
+    </div>
+    <Table rows={filtered.map((row) => ({ ...row, created_at: prettyDate(row.created_at), reset_request_status: <StatusBadge status={row.reset_request_status} />, account_status: <StatusBadge status={row.account_status} /> }))} columns={["full_name", "email", "contact_number", "account_status", "reset_request_status", "created_at"]} actions={(row) => <button className="btn-small" onClick={() => openCustomer(row)}><Eye size={14} /> View Customer</button>} />
+    {selected && <Dialog label="Customer Details" onClose={() => setSelected(null)}>
+      <div className="customer-detail-modal">
+        <div className="modal-headline"><div><span className="business-kicker">Customer Account</span><h2>{selected.full_name}</h2><p>{selected.email}</p></div><button className="btn" onClick={() => resetPassword(selected)}><KeyRound size={16} /> Reset Password</button></div>
+        <div className="info-grid compact">
+          <InfoTile label="Contact" value={selected.contact_number || "Not provided"} />
+          <InfoTile label="Account Status" value={selected.account_status} />
+          <InfoTile label="Password Change" value={selected.force_password_change ? "Required" : "Not required"} />
+          <InfoTile label="Last Login" value={prettyDate(selected.last_login_at) || "No login yet"} />
+        </div>
+        <SectionPanel title="Password Reset Requests">
+          {selected.reset_requests.length ? selected.reset_requests.map((request) => <div className="request-row" key={request.id}><div><strong>{request.status}</strong><span>{prettyDate(request.created_at)}{request.processed_by ? ` by ${request.processed_by}` : ""}</span></div><div className="row-actions">{request.status === "Pending" && <><button className="btn-small" onClick={() => resetPassword(selected)}>Generate</button><button className="btn-small danger" onClick={() => updateRequest(request, "Cancelled")}>Cancel</button></>}<button className="btn-small" disabled={request.status === "Processed"} onClick={() => updateRequest(request, "Processed")}>Processed</button></div></div>) : <EmptyState title="No reset requests" text="Customer forgot-password requests will appear here." />}
+        </SectionPanel>
+        <SectionPanel title="Account Security History">
+          {selected.security_history.length ? selected.security_history.map((event) => <Notice key={event.id} title={event.event_type} text={`${prettyDate(event.created_at)}${event.administrator ? ` - ${event.administrator}` : ""}${event.details ? ` - ${event.details}` : ""}`} />) : <EmptyState title="No security activity" text="Password reset and change events will appear here." />}
+        </SectionPanel>
+      </div>
+    </Dialog>}
+    {tempPassword && <Dialog label="Temporary Password Generated" onClose={() => setTempPassword(null)}>
+      <div className="temp-password-modal">
+        <div className="confirm-icon"><ShieldCheck size={22} /></div>
+        <h2>Temporary password generated</h2>
+        <p>A one-time temporary password has been created for {tempPassword.customer_name}. Provide it securely to the customer. The customer will be required to create a new password after logging in.</p>
+        <div className="info-grid compact"><InfoTile label="Customer name" value={tempPassword.customer_name} /><InfoTile label="Customer email" value={tempPassword.customer_email} /><InfoTile label="Expiration" value={prettyDate(tempPassword.expires_at)} /></div>
+        <div className="copy-box"><code>{tempPassword.temporary_password}</code><button className="btn-small" onClick={() => navigator.clipboard?.writeText(tempPassword.temporary_password)}>Copy Password</button></div>
+        <div className="confirm-actions single"><button className="btn" onClick={() => setTempPassword(null)}>Done</button></div>
+      </div>
+    </Dialog>}
+  </Page>;
 }
 
 function AdminReports({ auth }) {
