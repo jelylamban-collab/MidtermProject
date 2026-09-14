@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -35,6 +35,9 @@ import {
   Zap,
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
+import "@fontsource/inter/latin-400.css";
+import "@fontsource/inter/latin-600.css";
+import "@fontsource/inter/latin-700.css";
 import "./styles.css";
 import logoMark from "../images/ChatGPT Image Sep 11, 2026, 11_10_31 AM.png";
 import logoWordmark from "../images/ChatGPT Image Sep 11, 2026, 11_06_56 AM - Copy.png";
@@ -112,7 +115,13 @@ function concertExtras(concert = {}) {
 
 function useAuth() {
   const [auth, setAuth] = useState(() => {
-    const saved = JSON.parse(localStorage.getItem("ticketrush_auth") || "null");
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem("ticketrush_auth") || "null");
+    } catch {
+      localStorage.removeItem("ticketrush_auth");
+      return null;
+    }
     if (saved?.api_url && saved.api_url !== API) {
       localStorage.removeItem("ticketrush_auth");
       return null;
@@ -194,7 +203,7 @@ async function uploadImage(file, auth) {
   return result.url.startsWith("http") ? result.url : `${API}${result.url}`;
 }
 
-const fallbackPoster = "https://picsum.photos/seed/ticketrush-fallback/900/1200";
+const fallbackPoster = logoMark;
 const imageUploadAccept = "image/png,image/jpeg,image/jpg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif";
 const maxImageUploadSize = 15 * 1024 * 1024;
 
@@ -221,7 +230,9 @@ function mediaUrl(value) {
 }
 
 function SafeImage({ src, alt = "", className = "" }) {
-  return <img className={className} src={mediaUrl(src) || fallbackPoster} alt={alt} onError={(event) => { event.currentTarget.src = fallbackPoster; }} />;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  return <img className={className} src={failed ? fallbackPoster : mediaUrl(src) || fallbackPoster} alt={alt} onError={() => setFailed(true)} />;
 }
 
 function ImageUploadPreview({ label, src, uploading, onChoose, onRemove, shape = "poster" }) {
@@ -257,6 +268,46 @@ function askConfirm(message, title = "Confirm Action") {
   return Promise.resolve(false);
 }
 
+function useFocusScope(ref, open, onClose) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!open || !ref.current) return;
+    const previous = document.activeElement;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const root = ref.current;
+    const focusable = () => [...root.querySelectorAll('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')].filter((node) => node.getClientRects().length);
+    (focusable()[0] || root).focus();
+    const onKey = (event) => {
+      if (event.key === "Escape") { event.preventDefault(); closeRef.current(); }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      const first = items[0] || root;
+      const last = items.at(-1) || root;
+      if (!items.length || (event.shiftKey && document.activeElement === first)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    root.addEventListener("keydown", onKey);
+    return () => {
+      root.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [open, ref]);
+}
+
+function Dialog({ children, onClose, label = "Confirmation" }) {
+  const ref = useRef(null);
+  useFocusScope(ref, true, onClose);
+  return <div className="confirm-backdrop" onMouseDown={onClose}>
+    <div ref={ref} className="confirm-dialog" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+      <button className="icon-btn dialog-close" type="button" aria-label="Close dialog" onClick={onClose}><X size={20} /></button>
+      {children}
+    </div>
+  </div>;
+}
+
 function ConfirmProvider({ children }) {
   const [dialog, setDialog] = useState(null);
   useEffect(() => {
@@ -279,8 +330,7 @@ function ConfirmProvider({ children }) {
     <>
       {children}
       {dialog && (
-        <div className="confirm-backdrop" role="presentation" onMouseDown={() => close(false)}>
-          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()}>
+        <Dialog onClose={() => close(false)} label={dialog.title}>
             <div className="confirm-icon"><ShieldCheck size={22} /></div>
             <div>
               <h2 id="confirm-title">{dialog.title}</h2>
@@ -290,8 +340,7 @@ function ConfirmProvider({ children }) {
               <button className="btn-small" type="button" onClick={() => close(false)}>Cancel</button>
               <button className="btn" type="button" autoFocus onClick={() => close(true)}>Confirm</button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </>
   );
@@ -300,6 +349,10 @@ function ConfirmProvider({ children }) {
 function Shell({ auth, logout }) {
   const role = auth?.user?.role || "guest";
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const location = useLocation();
+  const menuRef = useRef(null);
+  useFocusScope(menuRef, drawerOpen && role !== "admin", () => setDrawerOpen(false));
+  useEffect(() => { setDrawerOpen(false); window.scrollTo(0, 0); }, [location.pathname]);
   const confirmLogout = async () => {
     if (await askConfirm("Log out from TicketRush?", "Log Out")) logout();
   };
@@ -322,7 +375,7 @@ function Shell({ auth, logout }) {
   if (role === "admin") {
     return (
       <div className="admin-app-shell">
-        <button className="admin-menu-button" onClick={() => setDrawerOpen(true)}><Menu size={18} /> Menu</button>
+        <button className="admin-menu-button" aria-expanded={drawerOpen} aria-controls="admin-navigation" onClick={() => setDrawerOpen(true)}><Menu size={18} /> Menu</button>
         <AdminSidebar auth={auth} logout={confirmLogout} open={drawerOpen} close={() => setDrawerOpen(false)} />
         <div className="admin-workspace">
           <Routes>
@@ -358,13 +411,14 @@ function Shell({ auth, logout }) {
   }
   return (
     <div className="app-shell">
-      <nav className="topbar">
+      <nav ref={menuRef} className={`topbar ${drawerOpen ? "menu-open" : ""}`} aria-label="Main navigation">
         <div className="topbar-inner">
           <Link to="/" className="brand">
             <BrandLogo />
           </Link>
-          <div className="nav-links">
-            {links.map(([label, path]) => <NavLink to={path} key={path}>{label}</NavLink>)}
+          <button className="icon-btn mobile-menu-button" aria-label={drawerOpen ? "Close menu" : "Open menu"} aria-expanded={drawerOpen} aria-controls="customer-navigation" onClick={() => setDrawerOpen(!drawerOpen)}>{drawerOpen ? <X size={22} /> : <Menu size={22} />}</button>
+          <div className="nav-links" id="customer-navigation">
+            {links.map(([label, path]) => <NavLink to={path} key={path} end={path === "/"}>{label}</NavLink>)}
           </div>
           <div className="nav-actions">
             {auth ? (
@@ -420,6 +474,19 @@ function Shell({ auth, logout }) {
 }
 
 function AdminSidebar({ auth, logout, open, close }) {
+  const sidebarRef = useRef(null);
+  useFocusScope(sidebarRef, open, close);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, close]);
   const links = [
     ["Dashboard", "/admin", LayoutDashboard],
     ["Concerts", "/admin/concerts", Ticket],
@@ -434,11 +501,11 @@ function AdminSidebar({ auth, logout, open, close }) {
   return (
     <>
       {open && <button className="drawer-backdrop" onClick={close} aria-label="Close menu" />}
-      <aside className={`admin-sidebar ${open ? "open" : ""}`}>
+      <aside ref={sidebarRef} id="admin-navigation" className={`admin-sidebar ${open ? "open" : ""}`} aria-label="Admin navigation" tabIndex={-1}>
         <div className="sidebar-brand">
           <BrandLogo />
           <BrandLogo compact />
-          <button className="sidebar-close" onClick={close} aria-label="Close menu"><X size={18} /></button>
+          <button className="icon-btn sidebar-close" onClick={close} aria-label="Close menu"><X size={18} /></button>
         </div>
         <nav className="sidebar-nav">
           {links.map(([label, path, Icon]) => (
@@ -485,40 +552,21 @@ function Landing() {
     event.preventDefault();
     navigate(`/concerts${query ? `?q=${encodeURIComponent(query)}` : ""}`);
   }
+  const heroImage = lead?.banner_url || lead?.poster_url || fallbackPoster;
   return (
     <main>
-      <section className="hero">
-        <div className="hero-backdrop" />
-        <div className="hero-grid">
+      <section className="hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(9, 9, 15, .96), rgba(9, 9, 15, .76) 48%, rgba(9, 9, 15, .22)), url("${heroImage}")` }}>
+        <div className="hero-inner">
           <div className="hero-copy">
             <div className="eyebrow"><Zap size={16} /> Live concerts, clear seats</div>
-            <h1>Feel the Rush. Secure Your Seat.</h1>
+            <h1>TicketRush</h1>
             <p>Browse upcoming concerts, compare ticket tiers, reserve your preferred seats, and keep your digital tickets ready for event day.</p>
             <form className="hero-search" onSubmit={search}>
               <Search size={20} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search concerts, artists, or venues" />
+              <label className="field-label">Search concerts<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Concert, artist, or venue" /></label>
               <button className="btn compact">Explore</button>
             </form>
-            <div className="hero-metrics">
-              <MiniMetric label="Sample shows" value={concerts.length || 3} />
-              <MiniMetric label="Seat refresh" value="5s" />
-              <MiniMetric label="Hold window" value="5m" />
-            </div>
-          </div>
-          <div className="spotlight">
-            {lead ? (
-              <>
-                <SafeImage src={lead.poster_url} />
-                <div className="spotlight-content">
-                  <span className="status-pill">{lead.status}</span>
-                  <h2>{lead.title}</h2>
-                  <p>{lead.artist}</p>
-                  <Link to={`/concerts/schedule/${lead.schedule_id}`} className="ghost-link">View show <ChevronRight size={16} /></Link>
-                </div>
-              </>
-            ) : (
-              <div className="spotlight-content"><h2>Loading shows</h2></div>
-            )}
+            {lead && <Link to={`/concerts/schedule/${lead.schedule_id}`} className="hero-featured"><span className="status-pill">{lead.status}</span><strong>{lead.title}</strong><small>{lead.artist}</small><ChevronRight size={18} /></Link>}
           </div>
         </div>
       </section>
@@ -638,7 +686,7 @@ function ConcertDetails({ admin = false, auth }) {
         <SafeImage className="event-hero-bg" src={details.banner} />
         <div className="event-hero-shade" />
         <div className="event-hero-content">
-          <div className="event-poster"><SafeImage src={concert.poster_url} /></div>
+          <div className="event-poster"><SafeImage src={concert.poster_url} alt={`${concert.title} poster`} /></div>
           <div className="event-copy">
             <span className="status-pill">{concert.status}</span>
             <h1>{concert.title}</h1>
@@ -703,8 +751,7 @@ function LoginPromptModal({ open, onClose, returnTo }) {
     return path;
   };
   return (
-    <div className="confirm-backdrop auth-prompt-backdrop" role="presentation" onMouseDown={onClose}>
-      <div className="confirm-dialog auth-prompt" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+    <Dialog onClose={onClose} label="Log in to continue">
         <div className="confirm-icon"><Lock size={22} /></div>
         <div>
           <h2>Log in to continue</h2>
@@ -715,8 +762,7 @@ function LoginPromptModal({ open, onClose, returnTo }) {
           <Link className="btn-small" to={saveReturn("/register")}>Create Account</Link>
           <button className="btn-small" type="button" onClick={onClose}>Continue Browsing</button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -783,8 +829,7 @@ function SeatSelection({ auth }) {
     <Page title={`Seat Map - ${map.venue}`} icon={<Ticket />}>
       <LoginPromptModal open={loginPrompt} onClose={() => setLoginPrompt(false)} returnTo={`/seat-selection/${scheduleId}`} />
       {seatConflict && (
-        <div className="confirm-backdrop" role="presentation">
-          <div className="confirm-dialog auth-prompt" role="dialog" aria-modal="true">
+        <Dialog onClose={() => setSeatConflict("")} label={/limit/i.test(seatConflict) ? "Maximum ticket limit reached" : "Seat no longer available"}>
             <div className="confirm-icon"><Ticket size={22} /></div>
             <div>
               <h2>{/limit/i.test(seatConflict) ? "Maximum ticket limit reached" : "Seat no longer available"}</h2>
@@ -800,8 +845,7 @@ function SeatSelection({ auth }) {
                 <button className="btn-small" type="button" onClick={() => { setSeatConflict(""); load(); }}>Refresh Seat Map</button>
               </div>
             )}
-          </div>
-        </div>
+        </Dialog>
       )}
       <div className="seat-layout">
         <div className="seat-map-panel">
@@ -814,7 +858,7 @@ function SeatSelection({ auth }) {
             ))}
           </div>
           <div className="stage">Stage</div>
-          <div className="seat-grid">
+          <div className="seat-map-scroll" tabIndex={0} role="region" aria-label="Seats"><div className="seat-grid">
             {map.seats.map((seat) => (
               <button
                 key={seat.id}
@@ -826,7 +870,7 @@ function SeatSelection({ auth }) {
                 {seat.label}
               </button>
             ))}
-          </div>
+          </div></div>
           <div className="legend-row">{["available", "held", "sold", "selected"].map((item) => <span key={item}><i className={`legend ${item}`} />{item}</span>)}</div>
         </div>
         <aside className="summary-panel">
@@ -984,6 +1028,7 @@ function Cart() {
 
 function SiteFooter({ role = "guest", auth }) {
   const guestLinks = [
+    ["Home", "/"],
     ["Browse Concerts", "/concerts"],
     ["About", "/about"],
     ["Help and FAQs", "/help"],
@@ -991,6 +1036,7 @@ function SiteFooter({ role = "guest", auth }) {
     ["Create Account", "/register"],
   ];
   const customerLinks = [
+    ["Home", "/"],
     ["Browse Concerts", "/concerts"],
     ["My Cart", "/cart"],
     ["My Tickets", "/tickets"],
@@ -1084,10 +1130,10 @@ function Profile({ auth }) {
       </div>
       <Feedback message={message} />
       {tab === "overview" && <><div className="business-metrics secondary"><Stat label="Upcoming Concerts" value={tickets.filter((ticket) => new Date(ticket.starts_at) >= new Date()).length} /><Stat label="Active Reservations" value={history.filter((row) => ["held", "pending"].includes(row.status)).length} /><Stat label="Total Tickets Purchased" value={tickets.length} /><Stat label="Completed Purchases" value={history.filter((row) => ["confirmed", "completed"].includes(row.status)).length} /></div>{nextTicket ? <div className="upcoming-card profile-next"><SafeImage src={nextTicket.poster_url} /><div><h4>{nextTicket.concert}</h4><p>{prettyDate(nextTicket.starts_at)} - {nextTicket.venue}</p><span>{nextTicket.category} - Seat {nextTicket.seat}</span><Link className="btn-small" to={`/tickets/${nextTicket.id}`}>View Ticket</Link></div></div> : <EmptyState title="No upcoming event yet" text="Your next confirmed ticket will appear here." />}</>}
-      {tab === "personal" && <form className="auth-card" onSubmit={saveProfile}><input className="field" value={profile.first_name} onChange={(e) => setProfile({ ...profile, first_name: e.target.value })} placeholder="First name" /><input className="field" value={profile.last_name} onChange={(e) => setProfile({ ...profile, last_name: e.target.value })} placeholder="Last name" /><input className="field" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} placeholder="Email" /><input className="field" value={profile.contact_number} onChange={(e) => setProfile({ ...profile, contact_number: e.target.value })} placeholder="Contact number" /><button className="btn">Save Profile</button></form>}
+      {tab === "personal" && <form className="auth-card" onSubmit={saveProfile}><Field value={profile.first_name} onChange={(e) => setProfile({ ...profile, first_name: e.target.value })} placeholder="First name" /><Field value={profile.last_name} onChange={(e) => setProfile({ ...profile, last_name: e.target.value })} placeholder="Last name" /><Field value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} placeholder="Email" /><Field value={profile.contact_number} onChange={(e) => setProfile({ ...profile, contact_number: e.target.value })} placeholder="Contact number" /><button className="btn">Save Profile</button></form>}
       {tab === "tickets" && <div className="ticket-grid">{tickets.map((ticket) => <div className="ticket-card" key={ticket.id}><div><span className="status-pill">Valid</span><h3>{ticket.concert}</h3><p>{prettyDate(ticket.starts_at)} - {ticket.venue}</p><p>{ticket.category} - Seat {ticket.seat}</p></div><div className="ticket-actions"><Link className="btn-small" to={`/tickets/${ticket.id}`}>View Ticket</Link><button className="btn-small" onClick={() => downloadTicketPdf(ticket.id, auth)}>Download</button></div></div>)}</div>}
       {tab === "history" && <Table rows={history.map((row) => ({ ...row, total_amount: peso(row.total_amount), created_at: prettyDate(row.created_at) }))} columns={["booking_reference", "status", "total_amount", "created_at"]} searchable />}
-      {tab === "security" && <form className="auth-card" onSubmit={savePassword}><input className="field" type="password" value={password.current_password} onChange={(e) => setPassword({ ...password, current_password: e.target.value })} placeholder="Current password" /><input className="field" type="password" value={password.new_password} onChange={(e) => setPassword({ ...password, new_password: e.target.value })} placeholder="New password" /><input className="field" type="password" value={password.confirm} onChange={(e) => setPassword({ ...password, confirm: e.target.value })} placeholder="Confirm new password" /><button className="btn">Change Password</button></form>}
+      {tab === "security" && <form className="auth-card" onSubmit={savePassword}><Field type="password" value={password.current_password} onChange={(e) => setPassword({ ...password, current_password: e.target.value })} placeholder="Current password" /><Field type="password" value={password.new_password} onChange={(e) => setPassword({ ...password, new_password: e.target.value })} placeholder="New password" /><Field type="password" value={password.confirm} onChange={(e) => setPassword({ ...password, confirm: e.target.value })} placeholder="Confirm new password" /><button className="btn">Change Password</button></form>}
     </Page>
   );
 }
@@ -1097,6 +1143,7 @@ function AuthPage({ register = false }) {
   const [form, setForm] = useState({ email: "", password: "", full_name: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [createdEmail, setCreatedEmail] = useState("");
   async function submit(event) {
     event.preventDefault();
     if (busy) return;
@@ -1111,7 +1158,10 @@ function AuthPage({ register = false }) {
     }
     setBusy(true);
     try {
-      if (register) await api("/auth/register", { method: "POST", body: JSON.stringify(form) });
+      if (register && createdEmail !== form.email.trim()) {
+        await api("/auth/register", { method: "POST", body: JSON.stringify({ ...form, email: form.email.trim(), full_name: form.full_name.trim() }) });
+        setCreatedEmail(form.email.trim());
+      }
       const result = await api("/auth/login", { method: "POST", body: JSON.stringify(form) });
       window.saveAuthBridge(result);
       const returnTo = sessionStorage.getItem("ticketrush_return_to");
@@ -1120,19 +1170,21 @@ function AuthPage({ register = false }) {
     } catch (error) {
       const message = error.message || "";
       if (register && /registered|409/i.test(message)) setError("This email already has a TicketRush account. Please log in instead.");
-      else setError(register ? "Could not create this account. Please check your details and try again." : "Invalid email or password.");
+      else if (/fetch|network/i.test(message)) setError("Unable to reach TicketRush. Please wait a moment and try again.");
+      else setError(message || "Could not complete your request. Please try again.");
     } finally {
       setBusy(false);
     }
   }
   return (
     <Page title={register ? "Register" : "Login"} icon={<Lock />}>
-      <form onSubmit={submit} className="auth-card">
-        <div><h2>{register ? "Create your account" : "Welcome back"}</h2><p>Use the demo credentials or create a customer account.</p></div>
-        {error && <div className="error-banner">{error}</div>}
-        {register && <input className="field" placeholder="Full name" value={form.full_name} disabled={busy} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />}
-        <input className="field" placeholder="Email" value={form.email} disabled={busy} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <input className="field" type="password" placeholder="Password" value={form.password} disabled={busy} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+      <form onSubmit={submit} className="auth-card" aria-busy={busy}>
+        <div><h2>{register ? "Create your account" : "Welcome back"}</h2></div>
+        {createdEmail && error && <p role="status">Your account was created. Sign in to continue.</p>}
+        {error && <div className="error-banner" role="alert">{error}</div>}
+        {register && <Field required autoComplete="name" minLength={2} placeholder="Full name" value={form.full_name} disabled={busy} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />}
+        <Field type="email" required autoComplete="email" placeholder="Email" value={form.email} disabled={busy} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        <Field type="password" required minLength={8} autoComplete={register ? "new-password" : "current-password"} placeholder="Password" value={form.password} disabled={busy} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         <button className="btn wide" disabled={busy}>{busy ? (register ? "Creating..." : "Logging in...") : (register ? "Create Account" : "Login")}</button>
         <Link className="muted center" to={register ? "/login" : "/register"}>{register ? "Already have an account?" : "Need an account?"}</Link>
       </form>
@@ -1174,7 +1226,7 @@ function AdminDashboard({ auth }) {
   const upcoming = view.upcoming;
   return (
     <Page title="Dashboard" icon={<LayoutDashboard />}>
-      <BusinessHeader title="Dashboard" subtitle="Overview of TicketRush sales, concerts, and reservations" onRefresh={load} />
+      <BusinessHeader title="Live overview" subtitle="Overview of TicketRush sales, concerts, and reservations" onRefresh={load} />
       <BusinessFilters data={data} filters={filters} setFilters={setFilters} compact />
       <div className="business-metrics primary">
         {primary.map((item) => <MetricCard key={item.label} {...item} />)}
@@ -1311,7 +1363,7 @@ function BusinessHeader({ title, subtitle, onRefresh, action }) {
   return (
     <div className="business-header">
       <div>
-        <h2>{title}</h2>
+        {title && <span className="business-kicker">{title}</span>}
         <p>{subtitle}</p>
       </div>
       <div className="business-header-actions">
@@ -1331,26 +1383,26 @@ function BusinessFilters({ data, filters, setFilters, reports = false }) {
   const reset = () => setFilters(defaultBusinessFilters());
   return (
     <div className="business-filters">
-      <select className="field" value={filters.range} onChange={(e) => setFilters({ ...filters, range: e.target.value })}>
+      <Field as="select" label="Date range" value={filters.range} onChange={(e) => setFilters({ ...filters, range: e.target.value })}>
         <option value="7">Last 7 Days</option>
         <option value="30">Last 30 Days</option>
         <option value="90">Last 90 Days</option>
         <option value="">All Dates</option>
-      </select>
-      <select className="field" value={filters.concert} onChange={(e) => setFilters({ ...filters, concert: e.target.value })}>
+      </Field>
+      <Field as="select" label="Concert" value={filters.concert} onChange={(e) => setFilters({ ...filters, concert: e.target.value })}>
         <option value="">All concerts</option>
         {concerts.map((concert) => <option value={concert.schedule_id} key={concert.schedule_id}>{concert.title}</option>)}
-      </select>
-      <select className="field" value={filters.venue} onChange={(e) => setFilters({ ...filters, venue: e.target.value })}>
+      </Field>
+      <Field as="select" label="Venue" value={filters.venue} onChange={(e) => setFilters({ ...filters, venue: e.target.value })}>
         <option value="">All venues</option>
         {venues.map((venue) => <option value={venue.venue_id} key={venue.venue_id}>{venue.venue}</option>)}
-      </select>
-      <select className="field" value={filters.tier} onChange={(e) => setFilters({ ...filters, tier: e.target.value })}>
+      </Field>
+      <Field as="select" label="Ticket tier" value={filters.tier} onChange={(e) => setFilters({ ...filters, tier: e.target.value })}>
         <option value="">All tiers</option>
         {tiers.map((tier) => <option value={tier} key={tier}>{tier}</option>)}
-      </select>
-      {reports && <select className="field" value={filters.reservation_status} onChange={(e) => setFilters({ ...filters, reservation_status: e.target.value })}><option value="">All reservations</option><option value="held">Active</option><option value="confirmed">Confirmed</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option></select>}
-      {reports && <select className="field" value={filters.transaction_status} onChange={(e) => setFilters({ ...filters, transaction_status: e.target.value })}><option value="">All transactions</option><option value="paid">Completed</option><option value="pending">Pending</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="refunded">Refunded</option></select>}
+      </Field>
+      {reports && <Field as="select" label="Reservation status" value={filters.reservation_status} onChange={(e) => setFilters({ ...filters, reservation_status: e.target.value })}><option value="">All reservations</option><option value="held">Active</option><option value="confirmed">Confirmed</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option></Field>}
+      {reports && <Field as="select" label="Transaction status" value={filters.transaction_status} onChange={(e) => setFilters({ ...filters, transaction_status: e.target.value })}><option value="">All transactions</option><option value="paid">Completed</option><option value="pending">Pending</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="refunded">Refunded</option></Field>}
       <button className="btn-small" onClick={reset}>Reset Filters</button>
     </div>
   );
@@ -1365,6 +1417,7 @@ function DataPanel({ title, children, className = "" }) {
 }
 
 function TrendChart({ rows }) {
+  if (!rows.length) return <EmptyState title="No sales yet" text="Sales will appear here when tickets are purchased." />;
   const maxRevenue = Math.max(...rows.map((row) => Number(row.revenue || 0)), 1);
   const maxTickets = Math.max(...rows.map((row) => Number(row.tickets || 0)), 1);
   return (
@@ -1384,9 +1437,10 @@ function TrendChart({ rows }) {
 function HorizontalBars({ rows, money = false, empty }) {
   if (!rows.length) return <EmptyState title={empty || "No data available"} text="Try changing the active filters." />;
   const max = Math.max(...rows.map((row) => Number(row.value || 0)), 1);
-  return <div className="horizontal-bars">{rows.map((row) => {
-    const content = <><span>{row.label}</span><i><b style={{ width: `${Math.max((Number(row.value || 0) / max) * 100, 4)}%` }} /></i><strong>{money ? peso(row.value) : row.value}</strong><small>{row.detail}</small></>;
-    return row.to ? <Link className="horizontal-bar" to={row.to} key={row.label}>{content}</Link> : <div className="horizontal-bar" key={row.label}>{content}</div>;
+  return <div className="horizontal-bars">{rows.map((row, index) => {
+    const content = <><span>{row.label}</span><i aria-hidden="true"><b style={{ width: `${(Number(row.value || 0) / max) * 100}%` }} /></i><strong>{money ? peso(row.value) : row.value}</strong><small>{row.detail}</small></>;
+    const key = row.key || row.to || `${row.label}-${index}`;
+    return row.to ? <Link className="horizontal-bar" to={row.to} key={key}>{content}</Link> : <div className="horizontal-bar" key={key}>{content}</div>;
   })}</div>;
 }
 
@@ -1404,7 +1458,7 @@ function SeatOccupancyCard({ occupancy, tiers }) {
         <div><span>Available seats</span><strong>{available}</strong></div>
         <div><span>Total sellable seats</span><strong>{occupancy?.total || 0}</strong></div>
       </div>
-      <div className="tier-summary">{tiers.slice(0, 6).map((tier) => <span key={`${tier.concert}-${tier.tier}`}>{tier.tier}: {tier.tickets_sold} sold</span>)}</div>
+      <div className="tier-summary">{tiers.slice(0, 6).map((tier, index) => <span key={`${tier.concert || "concert"}-${tier.tier || "tier"}-${index}`}>{tier.tier}: {tier.tickets_sold} sold</span>)}</div>
     </div>
   );
 }
@@ -1464,10 +1518,10 @@ function AdminConcerts({ auth }) {
     <Page title="Concerts" icon={<Ticket />} action={<div className="page-actions"><Link className="btn-small" to="/admin/archive"><Archive size={16} /> Archive</Link><Link className="btn" to="/admin/concerts/new"><Plus size={18} /> Add Concert</Link></div>}>
       <div className="admin-toolbar">
         <SearchField value={filters.q} setValue={(q) => setFilters({ ...filters, q })} />
-        <select className="field" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option>Draft</option><option>Upcoming</option><option>On Sale</option><option>Sold Out</option><option>Cancelled</option></select>
-        <select className="field" value={filters.venue} onChange={(e) => setFilters({ ...filters, venue: e.target.value })}><option value="">All venues</option>{venues.map((venue) => <option value={venue.id} key={venue.id}>{venue.name}</option>)}</select>
-        <input className="field" type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} />
-        <select className="field" value={filters.sort} onChange={(e) => setFilters({ ...filters, sort: e.target.value })}><option value="starts_at">Sort by date</option><option value="title">Sort by title</option><option value="status">Sort by status</option><option value="venue">Sort by venue</option></select>
+        <Field as="select" label="Status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option>Draft</option><option>Upcoming</option><option>On Sale</option><option>Sold Out</option><option>Cancelled</option></Field>
+        <Field as="select" label="Venue" value={filters.venue} onChange={(e) => setFilters({ ...filters, venue: e.target.value })}><option value="">All venues</option>{venues.map((venue) => <option value={venue.id} key={venue.id}>{venue.name}</option>)}</Field>
+        <Field label="Concert date" type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} />
+        <Field as="select" label="Sort by" value={filters.sort} onChange={(e) => setFilters({ ...filters, sort: e.target.value })}><option value="starts_at">Sort by date</option><option value="title">Sort by title</option><option value="status">Sort by status</option><option value="venue">Sort by venue</option></Field>
         <button className="btn-small" onClick={clearFilters}>Clear Filters</button>
       </div>
       <Feedback message={message} />
@@ -1716,17 +1770,17 @@ function AdminConcertForm({ auth, edit = false }) {
   );
   return (
     <Page title={edit ? "Edit Concert" : "Add Concert"} backTo="/admin/concerts">
-      <div className="stepper">{steps.map((label, index) => <button type="button" className={step === index ? "active" : ""} key={label} onClick={() => goToStep(index)}>{index + 1}. {label}</button>)}</div>
+      <nav className="stepper" aria-label="Concert setup progress">{steps.map((label, index) => <button type="button" aria-current={step === index ? "step" : undefined} className={step === index ? "active" : ""} key={label} onClick={() => goToStep(index)}>{index + 1}. {label}</button>)}</nav>
       <form className="admin-form wizard-form" onSubmit={saveConcert}>
         {step === 0 && <>
-          <input className="field" value={form.title} placeholder="Concert title" onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <input className="field" value={form.artist} placeholder="Artist or performer" onChange={(e) => setForm({ ...form, artist: e.target.value })} />
-          <input className="field" value={form.artist_description} placeholder="Short artist description" onChange={(e) => setForm({ ...form, artist_description: e.target.value })} />
-          <select className="field" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>Pop</option><option>Rock</option><option>Electronic</option><option>Indie</option><option>OPM</option></select>
+          <Field value={form.title} placeholder="Concert title" onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          <Field value={form.artist} placeholder="Artist or performer" onChange={(e) => setForm({ ...form, artist: e.target.value })} />
+          <Field value={form.artist_description} placeholder="Short artist description" onChange={(e) => setForm({ ...form, artist_description: e.target.value })} />
+          <Field as="select" label="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>Pop</option><option>Rock</option><option>Electronic</option><option>Indie</option><option>OPM</option></Field>
           <label className="field-label">Maximum tickets per customer<input className="field" type="number" min="1" max="20" value={form.max_tickets_per_customer || 4} onChange={(e) => setForm({ ...form, max_tickets_per_customer: e.target.value })} /></label>
           <ImageUploadPreview label="poster" src={form.poster_url} uploading={uploading} onChoose={(e) => chooseImage(e, "poster_url")} onRemove={() => setForm({ ...form, poster_url: "" })} />
           <ImageUploadPreview label="banner" src={form.banner_url} uploading={uploading} onChoose={(e) => chooseImage(e, "banner_url")} onRemove={() => setForm({ ...form, banner_url: "" })} shape="banner" />
-          <textarea className="field textarea" value={form.description} placeholder="Complete concert description" onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <Field as="textarea" value={form.description} placeholder="Complete concert description" onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </>}
         {step === 1 && <>
           <label className="field-label">Venue<select className="field" value={form.venue_id} onChange={(e) => setForm({ ...form, venue_id: e.target.value })}><option value="">Select venue</option>{venues.map((venue) => <option value={venue.id} key={venue.id}>{venue.name} - {venue.city} ({venue.capacity} seats)</option>)}</select></label>
@@ -1741,10 +1795,10 @@ function AdminConcertForm({ auth, edit = false }) {
           <VenuePreview venue={selectedVenue} seatMap={seatMap} />
         </>}
         {step === 2 && <div className="tier-pricing-grid">
-          <div className="pricing-table-head"><span>Tier</span><span>Venue Seats</span><span>Concert Price</span><span>Max Tickets / Customer</span><span>Benefits</span><span>Status</span></div>
+          <div className="pricing-table-head"><span>Tier</span><span>Venue Seats</span><span>Concert Price</span><span>Ticket Limit</span><span>Customer Access</span></div>
           {tierRows.map((tier) => {
           const value = form.tier_prices?.[tier.name] ?? (tier.name === "VIP" ? form.vip_price : tier.name === "Lower Bowl" ? form.lower_bowl_price : form.general_price);
-          return <div className="tier-price-row" key={tier.name}><strong>{tier.name}</strong><span>{tier.seats} seats</span><label className="field-label compact-label">Concert Price<input className="field" type="number" min="0" step="0.01" value={value} placeholder="PHP 0.00" onChange={(e) => setForm({ ...form, tier_prices: { ...(form.tier_prices || {}), [tier.name]: e.target.value } })} /></label><label className="field-label compact-label">Max Tickets / Customer<input className="field" type="number" min="1" max="10" defaultValue={4} /></label><label className="field-label compact-label">Benefits<input className="field" placeholder="Benefits or inclusions" defaultValue={`${tier.name} section access`} /></label><label className="check-label"><input type="checkbox" defaultChecked /> Enabled</label></div>;
+          return <div className="tier-price-row" key={tier.name}><strong>{tier.name}</strong><span>{tier.seats} seats</span><label className="field-label compact-label">Concert Price<input className="field" type="number" min="0" step="0.01" value={value} placeholder="PHP 0.00" onChange={(e) => setForm({ ...form, tier_prices: { ...(form.tier_prices || {}), [tier.name]: e.target.value } })} /></label><span>{form.max_tickets_per_customer || 4} tickets per customer</span><span>{tier.name} section access</span></div>;
         })}</div>}
         {step === 3 && <div className="rules-editor">
           <div className="rules-head"><div><h3>Rules and Regulations</h3><p>Set customer-facing entry, safety, refund, and venue policies for this concert.</p></div><button type="button" className="btn-small" onClick={addRule}><Plus size={16} /> Add Rule</button></div>
@@ -1795,7 +1849,7 @@ function AdminVenues({ auth }) {
     <Page title="Venues" icon={<MapPin />} action={<div className="page-actions"><Link className="btn-small" to="/admin/archive"><Archive size={16} /> Archive</Link><Link className="btn" to="/admin/venues/new"><Plus size={18} /> Add Venue</Link></div>}>
       <div className="admin-toolbar">
         <SearchField value={filters.q} setValue={(q) => setFilters({ ...filters, q })} />
-        <select className="field" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option>Active</option></select>
+        <Field as="select" label="Status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option>Active</option></Field>
         <button className="btn-small" onClick={clearFilters}>Clear Filters</button>
       </div>
       <Feedback message={message} />
@@ -1941,12 +1995,12 @@ function AdminVenueForm({ auth, edit = false }) {
       <form className="admin-form venue-create-form" onSubmit={saveVenue}>
         <label className="field-label">Venue name<input className="field" value={form.name} placeholder="SM Seaside Arena" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
         <label className="field-label">Complete address / city<input className="field" value={form.city} placeholder="Cebu City" onChange={(e) => setForm({ ...form, city: e.target.value })} /></label>
-        <textarea className="field textarea" value={form.description} placeholder="Venue description" onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <Field as="textarea" value={form.description} placeholder="Venue description" onChange={(e) => setForm({ ...form, description: e.target.value })} />
         {!edit && <div className="tier-seat-editor">
           <div className="tier-table-head"><span>Tier</span><span>Seats in this tier</span><span>Action</span></div>
           {form.tiers.map((tier, index) => <div className="tier-seat-row" key={index}>
-            <input className="field" value={tier.name} placeholder="Example: VVIP" onChange={(e) => updateTier(index, { name: e.target.value })} />
-            <input className="field" type="number" min="1" max="1500" value={tier.seats} placeholder="Example: 100" onChange={(e) => updateTier(index, { seats: e.target.value })} />
+            <Field label="Tier name" value={tier.name} placeholder="Example: VVIP" onChange={(e) => updateTier(index, { name: e.target.value })} />
+            <Field label="Number of seats" type="number" min="1" max="1500" value={tier.seats} placeholder="Example: 100" onChange={(e) => updateTier(index, { seats: e.target.value })} />
             <button className="btn-small danger" type="button" onClick={() => removeTier(index)} disabled={form.tiers.length === 1}>Remove</button>
           </div>)}
           <div className="form-actions"><button className="btn-small" type="button" onClick={addTier}><Plus size={16} /> Add Tier</button></div>
@@ -2031,8 +2085,8 @@ function AdminVenueSeating({ auth }) {
         <div className="tier-seat-editor">
           <div className="tier-table-head"><span>Tier</span><span>Seats in this tier</span><span>Action</span></div>
           {form.tiers.map((tier, index) => <div className="tier-seat-row" key={index}>
-            <input className="field" value={tier.name} placeholder="Example: VIP" onChange={(e) => updateTier(index, { name: e.target.value })} />
-            <input className="field" type="number" min="1" max="1500" value={tier.seats} placeholder="Example: 100" onChange={(e) => updateTier(index, { seats: e.target.value })} />
+            <Field label="Tier name" value={tier.name} placeholder="Example: VIP" onChange={(e) => updateTier(index, { name: e.target.value })} />
+            <Field label="Number of seats" type="number" min="1" max="1500" value={tier.seats} placeholder="Example: 100" onChange={(e) => updateTier(index, { seats: e.target.value })} />
             <button className="btn-small danger" type="button" onClick={() => removeTier(index)} disabled={form.tiers.length === 1}>Remove</button>
           </div>)}
         </div>
@@ -2084,9 +2138,9 @@ function AdminSeats() {
     <Page title="Manage Seats and Ticket Tiers" icon={<Ticket />}>
       <AdminLinks />
       <form className="admin-form compact-form" onSubmit={saveTier}>
-        <input className="field" value={tierForm.name} placeholder="Tier name" onChange={(e) => setTierForm({ ...tierForm, name: e.target.value })} />
-        <input className="field" value={tierForm.price} type="number" min="0" step="0.01" placeholder="Ticket price" onChange={(e) => setTierForm({ ...tierForm, price: e.target.value })} />
-        <input className="field" value={tierForm.benefits} placeholder="Benefits and inclusions" onChange={(e) => setTierForm({ ...tierForm, benefits: e.target.value })} />
+        <Field value={tierForm.name} placeholder="Tier name" onChange={(e) => setTierForm({ ...tierForm, name: e.target.value })} />
+        <Field value={tierForm.price} type="number" min="0" step="0.01" placeholder="Ticket price" onChange={(e) => setTierForm({ ...tierForm, price: e.target.value })} />
+        <Field value={tierForm.benefits} placeholder="Benefits and inclusions" onChange={(e) => setTierForm({ ...tierForm, benefits: e.target.value })} />
         <button className="btn">{editingTier ? "Update Tier" : "Add Tier"}</button>
       </form>
       <div className="tier-list admin-tier-list">{tiers.map((tier) => <div className={`tier-card ${tier.active ? "" : "inactive"}`} key={tier.name}><h3>{tier.name}</h3><p>{tier.benefits}</p><strong>{peso(tier.price)}</strong><span className="status-pill">{tier.active ? "Active" : "Inactive"}</span><div className="ticket-actions"><button className="btn-small" onClick={() => editTier(tier)}>Edit</button><button className="btn-small" onClick={() => toggleTier(tier.name)}>{tier.active ? "Deactivate" : "Activate"}</button><button className="btn-small danger" onClick={() => removeTier(tier.name)}>Remove</button></div></div>)}</div>
@@ -2138,7 +2192,7 @@ function AdminReports({ auth }) {
   return (
     <Page title="Reports" icon={<BarChart3 />}>
       <BusinessHeader
-        title="Reports"
+        title="Report center"
         subtitle="Analyze ticket sales, revenue, reservations, and concert performance"
         action={<><button className="btn-small" disabled={!hasExportData} onClick={exportCsv}><FileDown size={14} /> Export CSV</button><button className="btn-small" disabled={!hasExportData} onClick={() => window.print()}><Download size={14} /> Export PDF</button></>}
       />
@@ -2191,9 +2245,9 @@ function AdminTransactions({ auth }) {
     <Page title="Transactions" icon={<CreditCard />}>
       <div className="admin-toolbar">
         <SearchField value={filters.q} setValue={(q) => setFilters({ ...filters, q })} />
-        <select className="field" value={filters.concert} onChange={(e) => setFilters({ ...filters, concert: e.target.value })}><option value="">All concerts</option>{concerts.map((concert) => <option key={concert}>{concert}</option>)}</select>
-        <select className="field" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option value="paid">Paid</option><option value="completed">Completed</option><option value="pending">Pending</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="refunded">Refunded</option></select>
-        <input className="field" type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} />
+        <Field as="select" label="Concert" value={filters.concert} onChange={(e) => setFilters({ ...filters, concert: e.target.value })}><option value="">All concerts</option>{concerts.map((concert) => <option key={concert}>{concert}</option>)}</Field>
+        <Field as="select" label="Status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option value="paid">Paid</option><option value="completed">Completed</option><option value="pending">Pending</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="refunded">Refunded</option></Field>
+        <Field label="Concert date" type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} />
         <button className="btn-small" onClick={() => setFilters({ q: "", concert: "", status: "", date: "" })}>Clear Filters</button>
       </div>
       <Table rows={filtered.map((row) => ({ ...row, total_amount: peso(row.total_amount), created_at: prettyDate(row.created_at) }))} columns={["booking_reference", "customer", "concert", "quantity", "tiers", "total_amount", "payment_method", "payment_status", "created_at"]} actions={(row) => <Link className="btn-small" to={`/admin/transactions/${row.id}`}><Eye size={14} /> View</Link>} />
@@ -2353,9 +2407,9 @@ function Simulation({ auth }) {
   return (
     <Page title="Multithreading Simulation" icon={<Gauge />}>
       <div className="control-panel">
-        <select className="field" value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}><option value="safe">Safe mode</option><option value="unsafe">Unsafe demo</option></select>
-        <select className="field" value={form.attempts} onChange={(e) => setForm({ ...form, attempts: e.target.value })}>{[5, 10, 20, 50, 100].map((n) => <option key={n}>{n}</option>)}</select>
-        <select className="field" value={form.schedule_id} onChange={(e) => setForm({ ...form, schedule_id: e.target.value })}><option value="">Schedule</option>{concerts.map((c) => <option key={c.schedule_id} value={c.schedule_id}>{c.title}</option>)}</select>
+        <Field as="select" label="Mode" value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}><option value="safe">Safe mode</option><option value="unsafe">Unsafe demo</option></Field>
+        <Field as="select" label="Attempts" value={form.attempts} onChange={(e) => setForm({ ...form, attempts: e.target.value })}>{[5, 10, 20, 50, 100].map((n) => <option key={n}>{n}</option>)}</Field>
+        <Field as="select" label="Schedule" value={form.schedule_id} onChange={(e) => setForm({ ...form, schedule_id: e.target.value })}><option value="">Schedule</option>{concerts.map((c) => <option key={c.schedule_id} value={c.schedule_id}>{c.title}</option>)}</Field>
         <button className="btn" onClick={run} disabled={!form.schedule_id}>Run</button>
       </div>
       {result && <div className="results-block"><div className="stat-grid"><Stat label="Successful attempts" value={result.success_count} /><Stat label="Failed attempts" value={result.failure_count} /><Stat label="Mode" value={result.mode} /><Stat label="Workers" value={result.attempts} /></div><Table rows={result.results} columns={["attempt", "thread_name", "thread_id", "waiting_ms", "duration_ms", "result", "details"]} /></div>}
@@ -2441,7 +2495,16 @@ function SectionPanel({ title, children }) {
 }
 
 function SearchField({ value, setValue }) {
-  return <div className="search-field"><Search size={18} /><input value={value} onChange={(e) => setValue(e.target.value)} placeholder="Search and filter" /></div>;
+  return <label className="field-label">Search<div className="search-field"><Search size={18} /><input type="search" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Search and filter" /></div></label>;
+}
+
+function Field({ label, as: Control = "input", error, className = "field", ...props }) {
+  const id = useId();
+  return <div className={`field-label ${Control === "textarea" ? "field-wide" : ""}`}>
+    <label htmlFor={id}>{label || props.placeholder}</label>
+    <Control {...props} className={className} id={id} aria-invalid={error ? true : undefined} aria-describedby={error ? `${id}-error` : undefined} />
+    {error && <span id={`${id}-error`} role="alert">{error}</span>}
+  </div>;
 }
 
 function MiniMetric({ label, value }) {
@@ -2469,13 +2532,14 @@ function Table({ rows, columns, searchable = false, actions }) {
   const filtered = rows.filter((row) => !query || columns.some((column) => String(row[column] ?? "").toLowerCase().includes(query.toLowerCase())));
   const sorted = [...filtered].sort((a, b) => String(a[sortKey] ?? "").localeCompare(String(b[sortKey] ?? "")));
   const pageSize = 8;
-  const pageRows = sorted.slice((page - 1) * pageSize, page * pageSize);
   const pages = Math.max(Math.ceil(sorted.length / pageSize), 1);
+  const currentPage = Math.min(page, pages);
+  const pageRows = sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const tableClass = columns.includes("poster") || columns.includes("image") ? "table-wrap media-table" : "table-wrap";
   return (
     <>
       {searchable && <div className="table-tools"><SearchField value={query} setValue={(value) => { setQuery(value); setPage(1); }} /><span>{filtered.length} results</span></div>}
-      <div className={tableClass}>
+      <div className={tableClass} tabIndex={0} role="region" aria-label="Records">
         <table>
           <thead><tr>{columns.map((column) => <th key={column}><button onClick={() => setSortKey(column)}>{column.replaceAll("_", " ")}</button></th>)}{actions && <th>Actions</th>}</tr></thead>
           <tbody>{pageRows.map((row, index) => <tr key={row.id || index}>{columns.map((column) => {
@@ -2485,7 +2549,7 @@ function Table({ rows, columns, searchable = false, actions }) {
         </table>
         {!pageRows.length && <EmptyState title="No records found" text="Try another search or filter." />}
       </div>
-      {searchable && <div className="pagination"><button className="btn-small" disabled={page === 1} onClick={() => setPage((old) => old - 1)}>Previous</button><span>Page {page} of {pages}</span><button className="btn-small" disabled={page === pages} onClick={() => setPage((old) => old + 1)}>Next</button></div>}
+      {(searchable || pages > 1) && <div className="pagination"><button className="btn-small" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>Previous</button><span>Page {currentPage} of {pages}</span><button className="btn-small" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>Next</button></div>}
     </>
   );
 }

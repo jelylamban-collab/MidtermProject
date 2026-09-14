@@ -9,11 +9,15 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from xml.sax.saxutils import escape
 
 import qrcode
 from fastapi import HTTPException, status
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, joinedload
@@ -594,6 +598,7 @@ def ticket_pdf(db: Session, ticket_id: int, user: User) -> bytes:
     schedule = db.get(Schedule, ticket.schedule_id)
     concert = db.get(Concert, schedule.concert_id)
     seat = db.get(Seat, ticket.seat_id)
+    owner = db.get(User, reservation.user_id)
     buffer = io.BytesIO()
     page = canvas.Canvas(buffer, pagesize=letter)
     page.setFont("Helvetica-Bold", 22)
@@ -602,7 +607,7 @@ def ticket_pdf(db: Session, ticket_id: int, user: User) -> bytes:
     lines = [
         f"Ticket: {ticket.ticket_number}",
         f"Booking: {reservation.booking_reference}",
-        f"Customer: {user.full_name}",
+        f"Customer: {owner.full_name}",
         f"Concert: {concert.title}",
         f"Artist: {concert.artist}",
         f"Venue: {schedule.venue.name}",
@@ -610,14 +615,20 @@ def ticket_pdf(db: Session, ticket_id: int, user: User) -> bytes:
         f"Seat: {seat.label} ({seat.category_name})",
     ]
     y = 690
+    style = ParagraphStyle("Ticket detail", fontName="Helvetica", fontSize=11, leading=16)
     for line in lines:
-        page.drawString(72, y, line)
-        y -= 24
+        paragraph = Paragraph(escape(line), style)
+        _, height = paragraph.wrap(294, 700)
+        if y - height < 60:
+            page.showPage()
+            y = 730
+        paragraph.drawOn(page, 72, y - height)
+        y -= height + 10
     qr = qrcode.make(ticket.qr_payload)
     qr_buffer = io.BytesIO()
     qr.save(qr_buffer, format="PNG")
     qr_buffer.seek(0)
-    page.drawInlineImage(qr_buffer, 390, 560, 130, 130)
+    page.drawImage(ImageReader(qr_buffer), 390, 560, 150, 150, preserveAspectRatio=True)
     page.showPage()
     page.save()
     return buffer.getvalue()

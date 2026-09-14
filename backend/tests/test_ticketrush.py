@@ -72,6 +72,26 @@ def test_safe_simulation_allows_one_winner():
     assert response.json()["success_count"] == 1
 
 
+def test_ticket_pdf_download_has_embedded_qr_and_enforces_ownership():
+    email = "pdf-owner@example.com"
+    client.post("/auth/register", json={"email": email, "full_name": "A Customer With A Long Name For Printed Tickets", "password": "Password123!"})
+    headers = {"Authorization": f"Bearer {token(email, 'Password123!')}"}
+    schedule_id = client.get("/concerts").json()[0]["schedule_id"]
+    seats = client.get(f"/schedules/{schedule_id}/seats").json()["seats"]
+    seat_id = next(seat["id"] for seat in seats if seat["status"] == "available")
+    hold = client.post("/holds", json={"schedule_id": schedule_id, "seat_ids": [seat_id]}, headers=headers)
+    assert hold.status_code == 200, hold.text
+    purchase = client.post("/checkout", json={"schedule_id": schedule_id, "seat_ids": [seat_id], "idempotency_key": "pdf-download-regression"}, headers=headers)
+    assert purchase.status_code == 200, purchase.text
+    ticket_id = client.get("/tickets", headers=headers).json()[0]["id"]
+    pdf = client.get(f"/tickets/{ticket_id}/pdf", headers=headers)
+    assert pdf.status_code == 200, pdf.text
+    assert pdf.content.startswith(b"%PDF")
+    assert b"/Subtype /Image" in pdf.content
+    denied = client.get(f"/tickets/{ticket_id}/pdf", headers={"Authorization": f"Bearer {token()}"})
+    assert denied.status_code == 403
+
+
 def test_unsafe_simulation_demonstrates_race():
     admin = token(settings.admin_email, settings.admin_password)
     concerts = client.get("/concerts").json()

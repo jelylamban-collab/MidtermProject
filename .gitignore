@@ -10,3 +10,5 @@ node_modules/
 dist/
 .vercel/
 .env.local
+frontend/test-results/
+frontend/playwright-report/
