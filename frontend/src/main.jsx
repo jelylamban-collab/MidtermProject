@@ -935,6 +935,7 @@ function Checkout({ auth }) {
     setError("");
     try {
       const result = await api("/checkout", { method: "POST", body: JSON.stringify({ schedule_id: Number(scheduleId), seat_ids: selection.selected || [], idempotency_key: crypto.randomUUID(), payment_method: "Simulated Card" }) }, auth);
+      sessionStorage.removeItem("ticketrush_selection");
       navigate(`/confirmation/${result.booking_reference}`);
     } catch (error) {
       setError(/limit/i.test(error.message) ? "Maximum ticket limit reached. You cannot purchase more tickets for this concert." : "Seat no longer available. Another customer secured one of these seats before your reservation was completed. Please choose another available seat.");
@@ -1045,6 +1046,7 @@ function Cart({ auth }) {
   const navigate = useNavigate();
   const [selection, setSelection] = useState(() => JSON.parse(sessionStorage.getItem("ticketrush_selection") || "{}"));
   const [seconds, setSeconds] = useState(() => holdSecondsLeft(selection.heldUntil));
+  const [message, setMessage] = useState("");
   const seats = selection.seats || [];
   useEffect(() => {
     const tick = () => {
@@ -1061,6 +1063,19 @@ function Cart({ auth }) {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
+  useEffect(() => {
+    if (!selection.scheduleId || !selection.selected?.length) return;
+    api(`/schedules/${selection.scheduleId}/seats`).then((map) => {
+      const selectedIds = new Set(selection.selected);
+      const liveSeats = map.seats.filter((seat) => selectedIds.has(seat.id));
+      const allStillHeld = liveSeats.length === selection.selected.length && liveSeats.every((seat) => seat.status === "held");
+      if (!allStillHeld) {
+        sessionStorage.removeItem("ticketrush_selection");
+        setSelection({});
+        setMessage("Your cart was cleared because those seats are no longer on hold.");
+      }
+    }).catch(() => {});
+  }, [selection.scheduleId]);
   async function cancelHold() {
     if (!(await askConfirm("Cancel this cart reservation? The selected seats will become available again.", "Cancel Cart Reservation"))) return;
     try {
@@ -1072,6 +1087,7 @@ function Cart({ auth }) {
   }
   return (
     <Page title="My Cart" icon={<ShoppingCart />}>
+      <Feedback message={message} />
       {!seats.length ? <EmptyState title="Your cart is empty" text="Held seats will appear here while they are still valid." /> : (
         <div className="summary-panel static">
           <div className="timer"><Clock3 size={18} /> Seat hold expires in <strong>{formatHoldTime(seconds)}</strong></div>
