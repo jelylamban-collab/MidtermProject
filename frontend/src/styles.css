@@ -568,6 +568,13 @@ input[type="checkbox"], input[type="radio"] { flex-shrink: 0; }
 .check-label { align-items: center; color: rgb(255 255 255 / .82); display: flex; font-weight: 600; gap: 8px; }
 .price-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .concert-days-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.schedule-section { background: rgb(0 0 0 / .16); border: 1px solid rgb(255 255 255 / .1); border-radius: 8px; display: grid; gap: 14px; grid-column: 1 / -1; padding: 16px; }
+.schedule-section-head { align-items: end; border-bottom: 1px solid rgb(255 255 255 / .1); display: flex; gap: 12px; justify-content: space-between; padding-bottom: 12px; }
+.schedule-section-head h3 { color: #fff; font-size: 20px; font-weight: 700; margin: 0; }
+.schedule-section-head p { color: rgb(255 255 255 / .62); margin: 0; }
+.date-card { background: rgb(255 255 255 / .055); border: 1px solid rgb(255 255 255 / .1); border-radius: 8px; padding: 12px; }
+.date-card > span { color: #fff; font-size: 15px; }
+.date-card small { align-items: center; color: #ffcf9d; display: flex; flex-wrap: wrap; font-size: 13px; font-weight: 600; gap: 6px; min-height: 21px; }
 .capacity-hint { background: rgb(255 138 42 / .1); border: 1px solid rgb(255 138 42 / .22); border-radius: 8px; color: #ffd2ae; font-weight: 600; padding: 12px 14px; }
 .admin-toolbar { align-items: end; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); margin: 0 auto 18px; width: 100%; }
 .admin-toolbar.compact-toolbar { grid-template-columns: minmax(220px, 380px); }
@@ -934,6 +941,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .stat-grid.event-stats { grid-template-columns: minmax(0, 1fr); }
   .confirm-backdrop { padding: 16px; }
   .confirm-actions > * { flex: 1 1 120px; }
+  .schedule-section-head { align-items: flex-start; flex-direction: column; }
   .modal-headline, .request-row, .copy-box { align-items: stretch; flex-direction: column; }
   .page-head h1 { font-size: 26px; }
   .image-upload-preview { max-height: 220px; }

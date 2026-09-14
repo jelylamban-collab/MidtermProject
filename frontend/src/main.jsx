@@ -48,6 +48,8 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const peso = (value) => `₱${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
 const prettyDate = (value) => (value ? new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "");
+const prettyDateOnly = (value) => (value ? new Date(value).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "");
+const prettyTimeOnly = (value) => (value ? new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "");
 const maxTicketsPerTier = 4;
 const holdSecondsLeft = (heldUntil) => Math.max(Math.ceil((new Date(heldUntil || 0).getTime() - Date.now()) / 1000), 0);
 const formatHoldTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -1238,6 +1240,14 @@ function PasswordInput({ label, value, onChange, autoComplete = "current-passwor
   </div>;
 }
 
+function DateTimeField({ label, helper, value, onChange }) {
+  return <label className="field-label date-card">
+    <span>{label}</span>
+    <input className="field" type="datetime-local" value={value || ""} onChange={onChange} />
+    <small>{value ? <><Calendar size={14} /> {prettyDateOnly(value)} <Clock3 size={14} /> {prettyTimeOnly(value)}</> : helper}</small>
+  </label>;
+}
+
 function AuthPage({ register = false }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -1973,13 +1983,23 @@ function AdminConcertForm({ auth, edit = false }) {
         {step === 1 && <>
           <label className="field-label">Venue<select className="field" value={form.venue_id} onChange={(e) => setForm({ ...form, venue_id: e.target.value })}><option value="">Select venue</option>{venues.map((venue) => <option value={venue.id} key={venue.id}>{venue.name} - {venue.city} ({venue.capacity} seats)</option>)}</select></label>
           <label className="field-label">Number of concert days<input className="field" type="number" min="1" max="14" value={form.day_count || 1} onChange={(e) => setDayCount(e.target.value)} /></label>
-          <div className="concert-days-grid">
-            {Array.from({ length: Number(form.day_count || 1) }).map((_, index) => <label className="field-label" key={index}>Day {index + 1} date and start time<input className="field" type="datetime-local" value={(form.schedule_days || [form.starts_at])[index] || ""} onChange={(e) => setScheduleDay(index, e.target.value)} /></label>)}
+          <div className="schedule-section">
+            <div className="schedule-section-head"><h3>Concert Schedule</h3><p>Set the actual concert day or days customers can choose from.</p></div>
+            <div className="concert-days-grid">
+              {Array.from({ length: Number(form.day_count || 1) }).map((_, index) => <DateTimeField key={index} label={`Day ${index + 1} concert starts`} helper="Choose the concert date and start time" value={(form.schedule_days || [form.starts_at])[index] || ""} onChange={(e) => setScheduleDay(index, e.target.value)} />)}
+            </div>
+            <div className="concert-days-grid">
+              <DateTimeField label="Gates open" helper="When customers may enter the venue" value={form.gate_opens_at} onChange={(e) => setForm({ ...form, gate_opens_at: e.target.value })} />
+              <DateTimeField label="Concert ends" helper="Estimated ending date and time" value={form.ends_at} onChange={(e) => setForm({ ...form, ends_at: e.target.value })} />
+            </div>
           </div>
-          <label className="field-label">Gate-opening time<input className="field" type="datetime-local" value={form.gate_opens_at} onChange={(e) => setForm({ ...form, gate_opens_at: e.target.value })} /></label>
-          <label className="field-label">Estimated ending time<input className="field" type="datetime-local" value={form.ends_at} onChange={(e) => setForm({ ...form, ends_at: e.target.value })} /></label>
-          <label className="field-label">Ticket selling opens<input className="field" type="datetime-local" value={form.sale_opens_at} onChange={(e) => setForm({ ...form, sale_opens_at: e.target.value })} /></label>
-          <label className="field-label">Ticket selling closes<input className="field" type="datetime-local" value={form.sale_closes_at} onChange={(e) => setForm({ ...form, sale_closes_at: e.target.value })} /></label>
+          <div className="schedule-section">
+            <div className="schedule-section-head"><h3>Ticket Selling Period</h3><p>Customers can only buy tickets between these dates.</p></div>
+            <div className="concert-days-grid">
+              <DateTimeField label="Selling starts" helper="When buying tickets becomes available" value={form.sale_opens_at} onChange={(e) => setForm({ ...form, sale_opens_at: e.target.value })} />
+              <DateTimeField label="Selling ends" helper="Must be before the concert starts" value={form.sale_closes_at} onChange={(e) => setForm({ ...form, sale_closes_at: e.target.value })} />
+            </div>
+          </div>
           <VenuePreview venue={selectedVenue} seatMap={seatMap} />
         </>}
         {step === 2 && <div className="tier-pricing-grid">
