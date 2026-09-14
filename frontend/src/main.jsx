@@ -1862,10 +1862,19 @@ function AdminConcertForm({ auth, edit = false }) {
     if (!(await askConfirm("Remove this rule?", "Remove Rule"))) return;
     setForm((old) => ({ ...old, rules: (old.rules || []).filter((_, ruleIndex) => ruleIndex !== index) }));
   }
+  function tierPriceValue(tier, source = form) {
+    return source.tier_prices?.[tier.name] ?? (tier.name === "VIP" ? source.vip_price : tier.name === "Lower Bowl" ? source.lower_bowl_price : source.general_price);
+  }
+  function hasTierPrice(tier, source = form) {
+    return Number(tierPriceValue(tier, source)) > 0;
+  }
+  function filledScheduleDays(source = form) {
+    return (source.schedule_days || [source.starts_at]).filter(Boolean);
+  }
   function validateStep(index) {
-    if (index === 0 && (!form.title.trim() || !form.artist.trim())) return "Concert title and artist are required before continuing.";
-    if (index === 1 && (!form.venue_id || !(form.schedule_days || []).filter(Boolean).length || !form.sale_opens_at || !form.sale_closes_at)) return "Select a venue, concert day, and ticket selling dates before continuing.";
-    if (index === 2 && tierRows.some((tier) => !Number(form.tier_prices?.[tier.name] ?? (tier.name === "VIP" ? form.vip_price : tier.name === "Lower Bowl" ? form.lower_bowl_price : form.general_price)))) return "Add a ticket price for every enabled tier.";
+    if (index === 0 && (!form.title.trim() || !form.artist.trim() || !form.description.trim() || !form.poster_url)) return "Complete the title, artist, description, and poster before continuing.";
+    if (index === 1 && (!form.venue_id || filledScheduleDays().length < Number(form.day_count || 1) || !form.gate_opens_at || !form.ends_at || !form.sale_opens_at || !form.sale_closes_at)) return "Complete the venue, all concert days, gate time, end time, and ticket selling dates before continuing.";
+    if (index === 2 && tierRows.some((tier) => !hasTierPrice(tier))) return "Add a ticket price for every enabled tier.";
     if (index === 3 && !(form.rules || []).some((rule) => rule.title.trim() && rule.text.trim())) return "Add at least one complete rule before continuing.";
     return "";
   }
@@ -1897,9 +1906,9 @@ function AdminConcertForm({ auth, edit = false }) {
   function validatePublish(payload) {
     const rules = (form.rules || []).filter((rule) => rule.title.trim() && rule.text.trim());
     if (!payload.title || !payload.artist || !payload.description || !payload.poster_url) return "Complete the title, artist, description, and poster before publishing.";
-    if (!payload.venue_id || !payload.schedule_days.length || !payload.sale_opens_at || !payload.sale_closes_at) return "Complete the venue, concert day, and ticket selling dates before publishing.";
+    if (!payload.venue_id || payload.schedule_days.length < Number(form.day_count || 1) || !form.gate_opens_at || !form.ends_at || !payload.sale_opens_at || !payload.sale_closes_at) return "Complete the venue, all concert days, gate time, end time, and ticket selling dates before publishing.";
     if (!rules.length) return "Add at least one rule or regulation before publishing.";
-    if (tierRows.some((tier) => !Number(payload.tier_prices?.[tier.name] ?? 0) && !["VIP", "Lower Bowl", "General"].includes(tier.name))) return "Set prices for every venue tier before publishing.";
+    if (tierRows.some((tier) => !hasTierPrice(tier, payload))) return "Set prices for every venue tier before publishing.";
     return "";
   }
   async function saveConcert(event) {
@@ -1955,16 +1964,17 @@ function AdminConcertForm({ auth, edit = false }) {
     { name: "General", seats: selectedVenue ? Math.floor(selectedVenue.capacity * .4) : 0 },
   ];
   const completeRules = (form.rules || []).filter((rule) => rule.title.trim() && rule.text.trim());
+  const publishIssue = validatePublish({
+    ...form,
+    venue_id: form.venue_id ? Number(form.venue_id) : selectedVenue?.id,
+    schedule_days: filledScheduleDays(),
+    sale_opens_at: form.sale_opens_at,
+    sale_closes_at: form.sale_closes_at,
+    tier_prices: form.tier_prices || {},
+  });
   const publishReady = Boolean(
-    form.title.trim() &&
-    form.artist.trim() &&
-    form.description.trim() &&
-    form.poster_url &&
-    form.venue_id &&
-    (form.schedule_days || []).filter(Boolean).length &&
-    form.sale_opens_at &&
-    form.sale_closes_at &&
-    completeRules.length
+    !publishIssue &&
+    steps.every((_, index) => !validateStep(index))
   );
   return (
     <Page title={edit ? "Edit Concert" : "Add Concert"} backTo="/admin/concerts">
@@ -2024,6 +2034,7 @@ function AdminConcertForm({ auth, edit = false }) {
           <button type="button" className="btn-small" onClick={() => window.open("/concerts", "_blank")}>Preview as Customer</button>
           <button type="submit" className="btn" data-status="On Sale" disabled={uploading || !publishReady} title={publishReady ? "Publish Concert" : "Complete all required concert information first"}>Publish Concert</button>
         </div>
+        {!publishReady && <p className="publish-hint">{publishIssue || "Complete all required concert setup pages before publishing."}</p>}
       </form>
       <Feedback message={message} />
     </Page>

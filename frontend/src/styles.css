@@ -556,7 +556,7 @@ input[type="checkbox"], input[type="radio"] { flex-shrink: 0; }
 .center { text-align: center; }
 
 .admin-form { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 18px; padding: 18px; }
-.admin-form .textarea, .form-actions, .admin-preview, .price-grid, .concert-days-grid, .capacity-hint, .tier-seat-editor, .rules-editor { grid-column: 1 / -1; }
+.admin-form .textarea, .form-actions, .admin-preview, .price-grid, .concert-days-grid, .capacity-hint, .publish-hint, .tier-seat-editor, .rules-editor { grid-column: 1 / -1; }
 .compact-form { grid-template-columns: 1fr 180px 2fr auto; }
 .venue-create-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .form-actions { flex-wrap: wrap; gap: 10px; }
@@ -576,6 +576,7 @@ input[type="checkbox"], input[type="radio"] { flex-shrink: 0; }
 .date-card > span { color: #fff; font-size: 15px; }
 .date-card small { align-items: center; color: #ffcf9d; display: flex; flex-wrap: wrap; font-size: 13px; font-weight: 600; gap: 6px; min-height: 21px; }
 .capacity-hint { background: rgb(255 138 42 / .1); border: 1px solid rgb(255 138 42 / .22); border-radius: 8px; color: #ffd2ae; font-weight: 600; padding: 12px 14px; }
+.publish-hint { background: rgb(255 189 120 / .08); border: 1px solid rgb(255 189 120 / .18); border-radius: 8px; color: #ffd9b4; font-size: 14px; font-weight: 600; margin: -2px 0 0; padding: 12px 14px; }
 .admin-toolbar { align-items: end; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); margin: 0 auto 18px; width: 100%; }
 .admin-toolbar.compact-toolbar { grid-template-columns: minmax(220px, 380px); }
 .admin-toolbar .btn-small { min-height: 46px; white-space: nowrap; width: fit-content; }
