@@ -156,7 +156,7 @@ async function api(path, options = {}, auth) {
     } catch {
       message = text;
     }
-    if (response.status === 401) {
+    if (response.status === 401 && auth?.access_token) {
       localStorage.removeItem("ticketrush_auth");
       window.dispatchEvent(new Event("ticketrush-auth-expired"));
       message = "Session expired. Please log in again.";
@@ -1258,8 +1258,8 @@ function ForgotPasswordPage() {
     try {
       await api("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: email.trim().toLowerCase() }) });
       setSubmitted(true);
-    } catch {
-      setSubmitted(true);
+    } catch (error) {
+      setError(error.message || "Account not found. Please check the email address or create an account.");
     } finally {
       setBusy(false);
     }
@@ -1267,7 +1267,7 @@ function ForgotPasswordPage() {
   return <Page title="Forgot Password" icon={<KeyRound />}>
     <form className="auth-card" onSubmit={submit}>
       <div><h2>{submitted ? "Request received" : "Forgot your password?"}</h2><p>{submitted ? "If the email matches a TicketRush account, the administrator can assist with resetting its password." : "Enter the email address connected to your TicketRush account. Please contact the TicketRush administrator to request a temporary password."}</p></div>
-      {!submitted && <><Feedback message={error} /><Field type="email" required autoComplete="email" label="Email Address" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} /><button className="btn wide" disabled={busy}>{busy ? "Submitting..." : "Submit Request"}</button></>}
+      {!submitted && <><Feedback message={error} /><Field type="email" required autoComplete="email" label="Email Address" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} /><div className="form-actions"><Link className="btn-small" to="/login"><ArrowLeft size={14} /> Back</Link><button className="btn" disabled={busy}>{busy ? "Submitting..." : "Submit Request"}</button></div></>}
       {submitted && <Link className="btn wide" to="/login">Back to Login</Link>}
     </form>
   </Page>;

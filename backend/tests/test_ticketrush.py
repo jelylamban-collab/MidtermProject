@@ -464,8 +464,8 @@ def test_admin_temporary_password_reset_flow():
     forgot = client.post("/auth/forgot-password", json={"email": email})
     assert forgot.status_code == 200, forgot.text
     unknown = client.post("/auth/forgot-password", json={"email": "unknown-reset@example.com"})
-    assert unknown.status_code == 200, unknown.text
-    assert unknown.json()["message"] == forgot.json()["message"]
+    assert unknown.status_code == 404, unknown.text
+    assert "Account not found" in unknown.text
 
     admin = token(settings.admin_email, settings.admin_password)
     customers = client.get("/admin/customers", headers={"Authorization": f"Bearer {admin}"}).json()

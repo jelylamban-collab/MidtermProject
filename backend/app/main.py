@@ -196,10 +196,11 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
     email = payload.email.lower().strip()
     check_rate_limit(RESET_ATTEMPTS, email, 3, 3600, "Request received")
     user = db.scalar(select(User).where(User.email == email, User.role == "customer"))
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found. Please check the email address or create an account.")
     request = PasswordResetRequest(user_id=user.id if user else None, email=email, status="Pending")
     db.add(request)
-    if user:
-        security_event(db, user, "Password reset requested", "Customer submitted a forgot-password request.")
+    security_event(db, user, "Password reset requested", "Customer submitted a forgot-password request.")
     db.commit()
     return {"message": "Request received"}
 
