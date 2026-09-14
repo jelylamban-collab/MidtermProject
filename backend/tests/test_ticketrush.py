@@ -201,6 +201,26 @@ def test_admin_can_configure_venue_seating_before_concert():
     assert [tier["name"] for tier in body["tiers"]] == ["VVIP", "VIP", "Upper Box", "General Admission"]
     assert [tier["seats"] for tier in body["tiers"]] == [3, 5, 7, 5]
     assert len(body["seats"]) == 20
+    concert = client.post(
+        "/admin/concerts",
+        json={
+            "title": "Custom Tier Pricing",
+            "artist": "Seat Makers",
+            "description": "A concert that uses venue-specific ticket tiers.",
+            "poster_url": "https://picsum.photos/seed/custom-tier-pricing/900/1200",
+            "category": "Pop",
+            "status": "On Sale",
+            "venue_id": venue.json()["id"],
+            "starts_at": "2026-12-22T20:00:00+00:00",
+            "sale_opens_at": "2026-12-01T09:00:00+00:00",
+            "sale_closes_at": "2026-12-21T18:00:00+00:00",
+            "tier_prices": {"VVIP": "10000.00", "VIP": "5000.00", "Upper Box": "3000.00", "General Admission": "1200.00"},
+        },
+        headers=headers,
+    )
+    assert concert.status_code == 200, concert.text
+    public = next(row for row in client.get("/concerts").json() if row["title"] == "Custom Tier Pricing")
+    assert public["tier_prices"] == {"VVIP": 10000.0, "VIP": 5000.0, "Upper Box": 3000.0, "General Admission": 1200.0}
 
 
 def test_admin_can_create_multi_day_concert_schedules():

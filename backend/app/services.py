@@ -260,6 +260,7 @@ def concert_summary(db: Session) -> list[dict]:
                 "starts_at": schedule.starts_at,
                 "sale_opens_at": schedule.sale_opens_at,
                 "sale_closes_at": schedule.sale_closes_at,
+                "tier_prices": prices,
                 "vip_price": prices.get("VIP", Decimal("6500.00")),
                 "lower_bowl_price": prices.get("Lower Bowl", Decimal("3800.00")),
                 "general_price": prices.get("General", Decimal("1800.00")),
