@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     admin_email: str = "admin@gmail.com"
     admin_password: str = "Admin123"
-    seed_sample_data: bool = True
+    seed_sample_data: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -3,6 +3,7 @@ import string
 import time
 import uuid
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -84,6 +85,8 @@ def security_event(db: Session, user: User, event_type: str, details: str = "", 
 
 @app.on_event("startup")
 def startup():
+    if (os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("RENDER_EXTERNAL_URL")) and settings.database_url.startswith("sqlite"):
+        raise RuntimeError("DATABASE_URL must point to the Neon PostgreSQL database on Render. Refusing to start with temporary SQLite storage.")
     Base.metadata.create_all(bind=engine)
     ensure_optional_media_columns()
     if settings.seed_sample_data:
@@ -133,7 +136,7 @@ def ensure_optional_media_columns():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "database": engine.dialect.name}
 
 
 @app.post("/auth/register")
